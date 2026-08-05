@@ -1,5 +1,6 @@
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
+    QAbstractSpinBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -52,7 +53,7 @@ class Controls(QWidget):
         row1.setSpacing(8)
         self.time_current = QLabel("00:00")
         self.time_current.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.time_current.setMinimumWidth(52)
+        self.time_current.setMinimumWidth(70)
         self.progress = JumpSlider(Qt.Horizontal)
         self.progress.setRange(0, 1000)
         self.progress.setFocusPolicy(Qt.NoFocus)
@@ -60,7 +61,7 @@ class Controls(QWidget):
         self.progress.sliderMoved.connect(self._on_progress_moved)
         self.progress.sliderReleased.connect(self._on_progress_released)
         self.time_total = QLabel("00:00")
-        self.time_total.setMinimumWidth(52)
+        self.time_total.setMinimumWidth(70)
         row1.addWidget(self.time_current)
         row1.addWidget(self.progress, 1)
         row1.addWidget(self.time_total)
@@ -71,7 +72,7 @@ class Controls(QWidget):
         row2.setSpacing(8)
 
         self.prev_btn = QToolButton()
-        self.prev_btn.setIcon(icon("prev", size=18))
+        self.prev_btn.setIcon(icon("prev", size=20))
         self.prev_btn.setToolTip("上一个")
         self.prev_btn.setAutoRaise(True)
         self.prev_btn.setFocusPolicy(Qt.NoFocus)
@@ -79,7 +80,7 @@ class Controls(QWidget):
         row2.addWidget(self.prev_btn)
 
         self.play_btn = QToolButton()
-        self.play_btn.setIcon(icon("play", size=22))
+        self.play_btn.setIcon(icon("play", size=24))
         self.play_btn.setToolTip("播放/暂停 (空格)")
         self.play_btn.setAutoRaise(True)
         self.play_btn.setFocusPolicy(Qt.NoFocus)
@@ -87,7 +88,7 @@ class Controls(QWidget):
         row2.addWidget(self.play_btn)
 
         self.next_btn = QToolButton()
-        self.next_btn.setIcon(icon("next", size=18))
+        self.next_btn.setIcon(icon("next", size=20))
         self.next_btn.setToolTip("下一个")
         self.next_btn.setAutoRaise(True)
         self.next_btn.setFocusPolicy(Qt.NoFocus)
@@ -97,7 +98,7 @@ class Controls(QWidget):
         row2.addSpacing(8)
 
         self.mute_btn = QToolButton()
-        self.mute_btn.setIcon(icon("volume", size=18))
+        self.mute_btn.setIcon(icon("volume", size=20))
         self.mute_btn.setToolTip("静音")
         self.mute_btn.setAutoRaise(True)
         self.mute_btn.setFocusPolicy(Qt.NoFocus)
@@ -107,14 +108,14 @@ class Controls(QWidget):
         self.vol_slider = JumpSlider(Qt.Horizontal)
         self.vol_slider.setRange(0, 100)
         self.vol_slider.setValue(60)
-        self.vol_slider.setFixedWidth(120)
+        self.vol_slider.setFixedWidth(100)
         self.vol_slider.setToolTip("音量")
         self.vol_slider.setFocusPolicy(Qt.NoFocus)
         self.vol_slider.valueChanged.connect(self._on_vol_slider)
         row2.addWidget(self.vol_slider)
 
         self.vol_label = QLabel("60")
-        self.vol_label.setMinimumWidth(28)
+        self.vol_label.setMinimumWidth(32)
         self.vol_label.setAlignment(Qt.AlignCenter)
         row2.addWidget(self.vol_label)
 
@@ -134,8 +135,9 @@ class Controls(QWidget):
         self.speed_spin.setSingleStep(SPEED_STEP)
         self.speed_spin.setSuffix("x")
         self.speed_spin.setValue(1.0)
-        self.speed_spin.setFixedWidth(72)
+        self.speed_spin.setFixedWidth(84)
         self.speed_spin.setKeyboardTracking(False)
+        self.speed_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.speed_spin.setFocusPolicy(Qt.WheelFocus)
         self.speed_spin.valueChanged.connect(self._on_speed_spin)
         row2.addWidget(self.speed_spin)
@@ -151,13 +153,13 @@ class Controls(QWidget):
         row2.addSpacing(8)
 
         self.mode_btn = QPushButton("列表循环")
-        self.mode_btn.setFixedWidth(76)
+        self.mode_btn.setFixedWidth(88)
         self.mode_btn.setFocusPolicy(Qt.NoFocus)
         self.mode_btn.clicked.connect(self.mode_cycle_requested.emit)
         row2.addWidget(self.mode_btn)
 
         self.fullscreen_btn = QToolButton()
-        self.fullscreen_btn.setIcon(icon("fullscreen", size=18))
+        self.fullscreen_btn.setIcon(icon("fullscreen", size=20))
         self.fullscreen_btn.setToolTip("全屏 (F11)")
         self.fullscreen_btn.setAutoRaise(True)
         self.fullscreen_btn.setFocusPolicy(Qt.NoFocus)
@@ -219,17 +221,17 @@ class Controls(QWidget):
         self.vol_label.setText(str(int(v)))
 
     def set_muted_display(self, muted: bool):
-        self.mute_btn.setIcon(icon("volume_muted" if muted else "volume", size=18))
+        self.mute_btn.setIcon(icon("volume_muted" if muted else "volume", size=20))
         self.mute_btn.setToolTip("取消静音" if muted else "静音")
 
     # -- state -----------------------------------------------------------------
     def set_playing(self, playing: bool):
-        self.play_btn.setIcon(icon("pause" if playing else "play", size=22))
+        self.play_btn.setIcon(icon("pause" if playing else "play", size=24))
         self.play_btn.setToolTip("暂停" if playing else "播放 (空格)")
 
     def set_mode(self, label: str):
         self.mode_btn.setText(label)
 
     def set_fullscreen(self, fs: bool):
-        self.fullscreen_btn.setIcon(icon("fullscreen_exit" if fs else "fullscreen", size=18))
+        self.fullscreen_btn.setIcon(icon("fullscreen_exit" if fs else "fullscreen", size=20))
         self.fullscreen_btn.setToolTip("退出全屏 (F11)" if fs else "全屏 (F11)")

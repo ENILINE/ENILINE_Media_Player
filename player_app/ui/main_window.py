@@ -28,7 +28,7 @@ from ..core.commands import (
     UndoRedoStack,
 )
 from ..core.mpv_player import MpvPlayer
-from ..core.playlist_model import Entry, PlaylistCollection, is_media_file
+from ..core.playlist_model import Entry, Playlist, PlaylistCollection, is_media_file
 from ..core.speed import speed_for_turbo
 from ..core.storage import Storage
 from .controls import Controls
@@ -39,19 +39,20 @@ MODE_ONCE = 0
 MODE_LIST_LOOP = 1
 MODE_SINGLE_LOOP = 2
 MODE_SHUFFLE = 3
-MODE_LABELS = ["播完暂停", "列表循环", "单曲循环", "随机"]
+MODE_LABELS = ["播完暂停", "列表循环", "单集循环", "随机播放"]
 
 TURBO_HOLD_MS = 250
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, startup_paths=None):
         super().__init__()
         self.setWindowTitle("本地视频播放器")
         self.resize(1100, 700)
 
         self.storage = Storage()
         self.collection = PlaylistCollection.from_dict(self.storage.load_playlists())
+        self._ensure_builtin_lists()
         self.stack = UndoRedoStack()
         self.player = None
 
@@ -69,6 +70,8 @@ class MainWindow(QMainWindow):
         self._right_ctrl = False
         self._refresh_queued = False
 
+        self._startup_paths = startup_paths or []
+
         self._build_ui()
         self._load_settings()
         self._wire_controls()
@@ -82,9 +85,19 @@ class MainWindow(QMainWindow):
         self._resume_timer.timeout.connect(self._save_resume)
         self._resume_timer.start()
 
+    def _ensure_builtin_lists(self):
+        # Remove stale temp lists from saved data; always recreate fresh.
+        self.collection.playlists = [p for p in self.collection.playlists if not p.is_temp]
+        temp = Playlist("临时列表", is_temp=True)
+        self.collection.playlists.insert(0, temp)
+        if not any(p.name == "默认列表" and not p.is_temp for p in self.collection.playlists):
+            default = Playlist("默认列表")
+            self.collection.playlists.insert(1, default)
+
     # -- UI construction ----------------------------------------------------
     def _build_ui(self):
         self.video_surface = VideoSurface()
+        self.video_surface.files_dropped.connect(self._on_video_drop)
         self.controls = Controls()
 
         self.panel = PlaylistPanel()
@@ -102,11 +115,13 @@ class MainWindow(QMainWindow):
         self.panel.rename_entry_requested.connect(self.rename_entry)
 
         self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setHandleWidth(3)
         self.splitter.addWidget(self.panel)
         self.splitter.addWidget(self.video_surface)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([260, 740])
+        self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         central = QWidget()
         v = QVBoxLayout(central)
@@ -116,12 +131,55 @@ class MainWindow(QMainWindow):
         v.addWidget(self.controls)
         self.setCentralWidget(central)
 
+    def _on_splitter_moved(self):
+        self.panel.update()
+        self.panel.tree.update()
+        self.video_surface.update()
+
     def showEvent(self, event):
         super().showEvent(event)
         if self.player is None:
             self.player = MpvPlayer(self.video_surface.winId())
             self.player.set_volume(self._stored_volume)
             self._connect_player()
+            self._process_startup_paths()
+
+    def _process_startup_paths(self):
+        if not self._startup_paths:
+            return
+        paths = self._startup_paths
+        self._startup_paths = []
+        entries = self._collect_media_from_paths(paths)
+        if entries:
+            temp_pid = self._temp_list_pid()
+            if temp_pid:
+                self._run(add_entries_cmd(self.collection, temp_pid, entries))
+                self._play_index(temp_pid, 0)
+
+    def _temp_list_pid(self):
+        for p in self.collection.playlists:
+            if p.is_temp:
+                return p.id
+        return None
+
+    def _collect_media_from_paths(self, paths):
+        import os as _os
+        entries = []
+        seen = set()
+        for p in paths:
+            p = _os.path.abspath(p)
+            if _os.path.isfile(p) and is_media_file(p):
+                if p not in seen:
+                    entries.append(Entry(p))
+                    seen.add(p)
+            elif _os.path.isdir(p):
+                for root, _dirs, files in _os.walk(p):
+                    for f in files:
+                        fp = _os.path.join(root, f)
+                        if is_media_file(fp) and fp not in seen:
+                            entries.append(Entry(fp))
+                            seen.add(fp)
+        return entries
 
     def _connect_player(self):
         s = self.player.signals
@@ -137,7 +195,7 @@ class MainWindow(QMainWindow):
         self.controls.prev_requested.connect(self._play_prev)
         self.controls.next_requested.connect(self._play_next)
         self.controls.speed_changed.connect(lambda v: self.player and self.player.set_speed(v))
-        self.controls.volume_changed.connect(lambda v: self.player and self.player.set_volume(v))
+        self.controls.volume_changed.connect(self._on_volume_change)
         self.controls.mute_toggled.connect(self._toggle_mute)
         self.controls.mode_cycle_requested.connect(self._cycle_mode)
         self.controls.fullscreen_requested.connect(self._toggle_fullscreen)
@@ -225,7 +283,7 @@ class MainWindow(QMainWindow):
         self.player.toggle_play()
 
     def _on_controls_seek(self, t):
-        if not self.player:
+        if not self.player or not self._current_path:
             return
         self._at_eof = False
         self.player.seek(t, relative=False)
@@ -241,10 +299,28 @@ class MainWindow(QMainWindow):
         if was_eof:
             self.player.play()
 
-    def _toggle_mute(self):
+    def _on_volume_change(self, v):
         if self.player:
-            self.player.toggle_mute()
-            self.controls.set_muted_display(self.player.is_muted())
+            self.player.set_volume(v)
+            if self.player.is_muted():
+                self.player.set_mute(False)
+                self.controls.set_muted_display(False)
+            self.controls.set_volume_display(v)
+
+    def _toggle_mute(self, force_unmute=False):
+        if self.player:
+            if force_unmute and self.player.is_muted():
+                self.player.set_mute(False)
+                self.controls.set_muted_display(False)
+                self.controls.set_volume_display(self.player.get_volume())
+            elif not force_unmute:
+                self.player.toggle_mute()
+                muted = self.player.is_muted()
+                self.controls.set_muted_display(muted)
+                if muted:
+                    self.controls.set_volume_display(0)
+                else:
+                    self.controls.set_volume_display(self.player.get_volume())
 
     def _cycle_mode(self):
         self.playback_mode = (self.playback_mode + 1) % len(MODE_LABELS)
@@ -356,6 +432,8 @@ class MainWindow(QMainWindow):
         pl = self.collection.find(pid)
         if pl is None:
             return
+        if pl.is_temp:
+            return
         ret = QMessageBox.question(
             self, "删除播放列表",
             f"确定删除列表「{pl.name}」吗?本地文件不会被修改。",
@@ -385,6 +463,13 @@ class MainWindow(QMainWindow):
         if new_id:
             self.current_pid = new_id
             self._refresh_panel()
+
+    def _on_video_drop(self, paths):
+        entries = self._collect_media_from_paths(paths)
+        if entries:
+            temp_pid = self._temp_list_pid()
+            if temp_pid:
+                self._run(add_entries_cmd(self.collection, temp_pid, entries))
 
     def add_paths(self, pid, paths):
         entries = [Entry(p) for p in paths if p and is_media_file(p)]
@@ -519,11 +604,17 @@ class MainWindow(QMainWindow):
             return True
         if key == Qt.Key_Up:
             if self.player:
+                if self.player.is_muted():
+                    self.player.set_mute(False)
+                    self.controls.set_muted_display(False)
                 self.player.set_volume(self.player.get_volume() + 5)
                 self.controls.set_volume_display(self.player.get_volume())
             return True
         if key == Qt.Key_Down:
             if self.player:
+                if self.player.is_muted():
+                    self.player.set_mute(False)
+                    self.controls.set_muted_display(False)
                 self.player.set_volume(self.player.get_volume() - 5)
                 self.controls.set_volume_display(self.player.get_volume())
             return True

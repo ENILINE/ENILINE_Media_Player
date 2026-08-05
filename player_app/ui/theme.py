@@ -2,8 +2,8 @@
 
 QSS = """
 * {
-    font-family: "Segoe UI";
-    font-size: 12px;
+    font-family: "Consolas";
+    font-size: 16px;
 }
 QMainWindow, QWidget {
     background: #1e1e1e;
@@ -18,7 +18,7 @@ QPushButton, QToolButton {
     background: #2d2d30;
     border: 1px solid #3f3f46;
     border-radius: 4px;
-    padding: 4px 10px;
+    padding: 5px 12px;
     color: #e0e0e0;
 }
 QPushButton:hover, QToolButton:hover {
@@ -32,7 +32,7 @@ QPushButton:disabled, QToolButton:disabled {
     background: #2d2d30;
 }
 QToolButton {
-    padding: 4px;
+    padding: 5px;
 }
 QDoubleSpinBox, QLineEdit {
     background: #333333;
@@ -56,10 +56,10 @@ QSlider::sub-page:horizontal {
     border-radius: 2px;
 }
 QSlider::handle:horizontal {
-    width: 14px;
-    height: 14px;
-    margin: -5px 0;
-    border-radius: 7px;
+    width: 16px;
+    height: 16px;
+    margin: -6px 0;
+    border-radius: 8px;
     background: #e0e0e0;
 }
 QSlider::handle:horizontal:hover {
@@ -73,7 +73,7 @@ QTreeWidget {
     outline: none;
 }
 QTreeWidget::item {
-    height: 26px;
+    height: 32px;
     padding-left: 4px;
     border-radius: 3px;
 }

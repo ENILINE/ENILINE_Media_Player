@@ -21,22 +21,27 @@ class Entry:
 
 
 class Playlist:
-    def __init__(self, name: str, id: str | None = None):
+    def __init__(self, name: str, id: str | None = None, is_temp: bool = False):
         self.id = id or str(uuid.uuid4())
         self.name = name
+        self.is_temp = is_temp
         self.entries: list[Entry] = []
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
-            "entries": [{"path": e.path, "name": e.display_name} for e in self.entries],
+            "entries": [{"path": e.path, "name": e.display_name} for e in self.entries] if not self.is_temp else [],
         }
+        if self.is_temp:
+            d["is_temp"] = True
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Playlist":
-        p = cls(d["name"], d.get("id"))
-        p.entries = [Entry(e["path"], e.get("name")) for e in d.get("entries", [])]
+        p = cls(d["name"], d.get("id"), d.get("is_temp", False))
+        if not p.is_temp:
+            p.entries = [Entry(e["path"], e.get("name")) for e in d.get("entries", [])]
         return p
 
 

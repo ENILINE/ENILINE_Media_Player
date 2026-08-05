@@ -18,8 +18,7 @@ _SVGS = {
               '<path fill="{color}" fill-opacity="0.35" d="M14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
     "volume_muted": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
                     '<path fill="{color}" d="M3 9v6h4l5 5V4L7 9H3z"/>'
-                    '<path fill="{color}" d="M16 9l6 6M22 9l-6 6" stroke="{color}" stroke-width="2" fill="none"/>'
-                    '</svg>',
+                    '<path fill="{color}" d="M16.5 9.5l1.4-1.4L20 10.2l2.1-2.1 1.4 1.4-2.1 2.1 2.1 2.1-1.4 1.4L20 13l-2.1 2.1-1.4-1.4 2.1-2.1z"/></svg>',
     "fullscreen": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
                   '<path fill="none" stroke="{color}" stroke-width="2" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>'
                   '</svg>',

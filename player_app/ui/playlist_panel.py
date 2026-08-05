@@ -5,8 +5,10 @@ from PyQt5.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
     QFileDialog,
+    QLineEdit,
     QMenu,
     QMessageBox,
+    QStyledItemDelegate,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -29,6 +31,13 @@ def collect_media_files(directory: str) -> list[str]:
             if is_media_file(p):
                 out.append(p)
     return out
+
+
+class _RenameDelegate(QStyledItemDelegate):
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        editor.setMinimumWidth(160)
+        return editor
 
 
 class _Tree(QTreeWidget):
@@ -64,6 +73,7 @@ class PlaylistPanel(QWidget):
         self._build()
 
     def _build(self):
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         self.tree = _Tree(self)
@@ -79,6 +89,7 @@ class PlaylistPanel(QWidget):
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.itemExpanded.connect(self._on_item_expanded)
         self.tree.itemCollapsed.connect(self._on_item_collapsed)
+        self.tree.setItemDelegate(_RenameDelegate(self.tree))
         self.tree.itemDelegate().closeEditor.connect(self._on_editor_closed)
         self.tree.setAcceptDrops(True)
         self.tree.setDragEnabled(False)
@@ -98,6 +109,8 @@ class PlaylistPanel(QWidget):
         if pid:
             self._expanded_pids.discard(pid)
 
+    TEMP_ROLE = Qt.UserRole + 1
+
     def refresh(self, collection, current_pid, current_index):
         self._updating = True
         self.tree.blockSignals(True)
@@ -108,6 +121,7 @@ class PlaylistPanel(QWidget):
             for pl in collection.playlists:
                 pl_item = QTreeWidgetItem([pl.name])
                 pl_item.setData(0, Qt.UserRole, pl.id)
+                pl_item.setData(0, self.TEMP_ROLE, pl.is_temp)
                 pl_item.setFlags(pl_item.flags() | Qt.ItemIsEditable)
                 pl_item.setToolTip(0, pl.name)
                 self.tree.addTopLevelItem(pl_item)
@@ -256,14 +270,18 @@ class PlaylistPanel(QWidget):
         item = self.tree.itemAt(pos)
         menu = QMenu(self)
         menu.addAction("新建列表", self._create_inline)
+        menu.addSeparator()
         if item is not None:
             pid = self._pid_of_item(item)
-            if pid:
-                menu.addSeparator()
+            is_temp = bool(item.data(0, self.TEMP_ROLE)) if item.parent() is None else bool(item.parent().data(0, self.TEMP_ROLE))
             if item.parent() is None:
+                menu.addAction("添加文件", lambda: self._add_files_to(pid))
+                menu.addAction("添加目录", lambda: self._add_directory_to(pid))
+                menu.addSeparator()
                 menu.addAction("重命名", self._rename_current)
                 menu.addAction("复制", lambda: self.copy_list_requested.emit(pid))
-                menu.addAction("删除", lambda: self.delete_requested.emit(pid))
+                if not is_temp:
+                    menu.addAction("删除", lambda: self.delete_requested.emit(pid))
             else:
                 menu.addAction("添加文件", self._add_files)
                 menu.addAction("添加目录", self._add_directory)
@@ -274,6 +292,10 @@ class PlaylistPanel(QWidget):
                 menu.addSeparator()
                 menu.addAction("重命名", self._rename_current)
                 menu.addAction("删除", self._delete_selection)
+        else:
+            pid = self.current_pid
+            menu.addAction("添加文件", lambda: self._add_files_to(pid))
+            menu.addAction("添加目录", lambda: self._add_directory_to(pid))
         menu.exec_(self.tree.viewport().mapToGlobal(pos))
 
     def _create_inline(self):
@@ -321,6 +343,24 @@ class PlaylistPanel(QWidget):
             self._pending = None
 
     # -- add files / directory --------------------------------------------------
+    def _add_files_to(self, pid):
+        if not pid:
+            return
+        files, _ = QFileDialog.getOpenFileNames(self, "添加文件", "", MEDIA_FILTER)
+        if files:
+            self.add_paths_requested.emit(pid, files)
+
+    def _add_directory_to(self, pid):
+        if not pid:
+            return
+        directory = QFileDialog.getExistingDirectory(self, "添加目录")
+        if directory:
+            files = collect_media_files(directory)
+            if not files:
+                QMessageBox.information(self, "播放列表", "该目录下没有找到媒体文件。")
+                return
+            self.add_paths_requested.emit(pid, files)
+
     def _add_files(self):
         pid = self._selected_playlist_pid()
         if not pid:

@@ -38,7 +38,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("VideoPlayer")
     app.setStyleSheet(QSS)
-    win = MainWindow()
+    startup_paths = []
+    for arg in sys.argv[1:]:
+        arg = arg.strip()
+        if arg and os.path.exists(arg):
+            startup_paths.append(os.path.abspath(arg))
+    win = MainWindow(startup_paths=startup_paths)
     win.show()
     sys.exit(app.exec_())
 
