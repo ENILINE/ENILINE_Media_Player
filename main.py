@@ -31,11 +31,13 @@ _bootstrap_mpv()
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
 from player_app.ui.main_window import MainWindow  # noqa: E402
+from player_app.ui.theme import QSS  # noqa: E402
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("VideoPlayer")
+    app.setStyleSheet(QSS)
     win = MainWindow()
     win.show()
     sys.exit(app.exec_())

@@ -20,6 +20,7 @@ class MpvSignals(QObject):
 class MpvPlayer:
     def __init__(self, surface_winid):
         self.signals = MpvSignals()
+        self._muted = False  # mute state tracked locally; reading mpv's `mute` property can crash
         self._player = mpv.MPV(
             wid=str(int(surface_winid)),
             vo="gpu",
@@ -97,7 +98,14 @@ class MpvPlayer:
         self._player.volume = max(0, int(v))
 
     def toggle_mute(self):
-        self._player.mute = not bool(self._player.mute)
+        self.set_mute(not self._muted)
+
+    def set_mute(self, on: bool):
+        self._muted = bool(on)
+        self._player.command("set", "mute", "yes" if self._muted else "no")
+
+    def is_muted(self) -> bool:
+        return self._muted
 
     def get_position(self) -> float:
         v = self._player.time_pos

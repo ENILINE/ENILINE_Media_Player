@@ -2,12 +2,10 @@ import random
 
 from PyQt5.QtCore import QEvent, Qt, QTimer
 from PyQt5.QtWidgets import (
-    QAbstractButton,
     QAbstractSpinBox,
     QApplication,
     QComboBox,
     QHBoxLayout,
-    QInputDialog,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -69,6 +67,7 @@ class MainWindow(QMainWindow):
         self._base_speed = 1.0
         self._right_timer = None
         self._right_ctrl = False
+        self._refresh_queued = False
 
         self._build_ui()
         self._load_settings()
@@ -88,13 +87,6 @@ class MainWindow(QMainWindow):
         self.video_surface = VideoSurface()
         self.controls = Controls()
 
-        left = QWidget()
-        lv = QVBoxLayout(left)
-        lv.setContentsMargins(0, 0, 0, 0)
-        lv.setSpacing(0)
-        lv.addWidget(self.video_surface, 1)
-        lv.addWidget(self.controls)
-
         self.panel = PlaylistPanel()
         self.panel.playlist_selected.connect(self.select_playlist)
         self.panel.play_requested.connect(self.play_index)
@@ -103,23 +95,25 @@ class MainWindow(QMainWindow):
         self.panel.copy_requested.connect(self.copy_entries)
         self.panel.paste_requested.connect(self.paste_entries)
         self.panel.remove_requested.connect(self.remove_entries)
-        self.panel.rename_entry_requested.connect(self.rename_entry)
         self.panel.create_requested.connect(self.create_playlist)
         self.panel.delete_requested.connect(self.delete_playlist)
-        self.panel.rename_requested.connect(self.rename_playlist)
+        self.panel.rename_list_requested.connect(self.rename_playlist)
         self.panel.copy_list_requested.connect(self.copy_playlist)
+        self.panel.rename_entry_requested.connect(self.rename_entry)
 
         self.splitter = QSplitter(Qt.Horizontal)
-        self.splitter.addWidget(left)
         self.splitter.addWidget(self.panel)
-        self.splitter.setStretchFactor(0, 3)
+        self.splitter.addWidget(self.video_surface)
+        self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([760, 340])
+        self.splitter.setSizes([260, 740])
 
         central = QWidget()
-        h = QHBoxLayout(central)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.addWidget(self.splitter)
+        v = QVBoxLayout(central)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        v.addWidget(self.splitter, 1)
+        v.addWidget(self.controls)
         self.setCentralWidget(central)
 
     def showEvent(self, event):
@@ -140,6 +134,8 @@ class MainWindow(QMainWindow):
 
     def _wire_controls(self):
         self.controls.play_toggled.connect(self._toggle_play)
+        self.controls.prev_requested.connect(self._play_prev)
+        self.controls.next_requested.connect(self._play_next)
         self.controls.speed_changed.connect(lambda v: self.player and self.player.set_speed(v))
         self.controls.volume_changed.connect(lambda v: self.player and self.player.set_volume(v))
         self.controls.mute_toggled.connect(self._toggle_mute)
@@ -259,9 +255,11 @@ class MainWindow(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
             self.panel.show()
+            self.controls.set_fullscreen(False)
         else:
             self.panel.hide()
             self.showFullScreen()
+            self.controls.set_fullscreen(True)
 
     def play_index(self, pid, index):
         self._play_index(pid, index)
@@ -279,11 +277,45 @@ class MainWindow(QMainWindow):
         self.player.load(pl.entries[index].path)
         self._refresh_panel()
 
+    def _play_prev(self):
+        self._advance_play(-1)
+
+    def _play_next(self):
+        self._advance_play(1)
+
+    def _advance_play(self, direction):
+        if not self.player:
+            return
+        pid = self.playing_pid or self.current_pid
+        pl = self.collection.find(pid)
+        if pl is None or not pl.entries:
+            return
+        n = len(pl.entries)
+        cur = self.playing_index if self.playing_pid == pl.id else -1
+        if direction > 0 and self.playback_mode == MODE_SHUFFLE and n > 1 and cur >= 0:
+            nxt = random.choice([i for i in range(n) if i != cur])
+        elif direction > 0:
+            nxt = (cur + 1) % n
+        else:
+            nxt = (cur - 1) if cur > 0 else n - 1
+        self._play_index(pl.id, nxt)
+
     def select_playlist(self, pid):
+        # Called from the tree's selection-changed signal; must not rebuild the
+        # tree (that would clear() it from inside its own signal handler).
         self.current_pid = pid
-        self._refresh_panel()
 
     def _refresh_panel(self):
+        # Defer to the next event-loop turn: rebuilds clear() the tree, which
+        # must not happen while Qt is still inside a widget event handler
+        # (e.g. the tree's own keyPressEvent after Ctrl+X / Delete).
+        if self._refresh_queued:
+            return
+        self._refresh_queued = True
+        QTimer.singleShot(0, self._do_refresh_panel)
+
+    def _do_refresh_panel(self):
+        self._refresh_queued = False
         hi = self.playing_index if self.playing_pid == self.current_pid else None
         self.panel.refresh(self.collection, self.current_pid, hi)
 
@@ -311,13 +343,14 @@ class MainWindow(QMainWindow):
             elif self.playing_index >= len(pl.entries):
                 self.playing_index = -1
 
-    def create_playlist(self):
-        name, ok = QInputDialog.getText(self, "新建播放列表", "列表名称:", text="新建列表")
-        if ok and name.strip():
-            cmd, pid = create_playlist_cmd(self.collection, name.strip())
-            self._run(cmd)
-            self.current_pid = pid
-            self._refresh_panel()
+    def create_playlist(self, name):
+        name = (name or "").strip()
+        if not name:
+            return
+        cmd, pid = create_playlist_cmd(self.collection, name)
+        self._run(cmd)
+        self.current_pid = pid
+        self._refresh_panel()
 
     def delete_playlist(self, pid):
         pl = self.collection.find(pid)
@@ -339,13 +372,12 @@ class MainWindow(QMainWindow):
         cmd = delete_playlist_cmd(self.collection, pid)
         self._run(cmd)
 
-    def rename_playlist(self, pid):
+    def rename_playlist(self, pid, new_name):
         pl = self.collection.find(pid)
-        if pl is None:
+        new_name = (new_name or "").strip()
+        if pl is None or not new_name or new_name == pl.name:
             return
-        name, ok = QInputDialog.getText(self, "重命名播放列表", "列表名称:", text=pl.name)
-        if ok and name.strip() and name.strip() != pl.name:
-            self._run(rename_playlist_cmd(self.collection, pid, name.strip()))
+        self._run(rename_playlist_cmd(self.collection, pid, new_name))
 
     def copy_playlist(self, pid):
         cmd, new_id = copy_playlist_cmd(self.collection, pid)
@@ -395,13 +427,13 @@ class MainWindow(QMainWindow):
         if self.clipboard.get("mode") == "cut":
             self.clipboard = None
 
-    def rename_entry(self, pid, index):
+    def rename_entry(self, pid, index, new_name):
         pl = self.collection.find(pid)
+        new_name = (new_name or "").strip()
         if pl is None or not (0 <= index < len(pl.entries)):
             return
-        name, ok = QInputDialog.getText(self, "重命名条目", "显示名称:", text=pl.entries[index].display_name)
-        if ok and name.strip() and name.strip() != pl.entries[index].display_name:
-            self._run(rename_entry_cmd(self.collection, pid, index, name.strip()))
+        if new_name and new_name != pl.entries[index].display_name:
+            self._run(rename_entry_cmd(self.collection, pid, index, new_name))
 
     def undo(self):
         if self.stack.undo():
@@ -429,6 +461,10 @@ class MainWindow(QMainWindow):
         w = QApplication.focusWidget()
         return isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox))
 
+    def _tree_has_focus(self):
+        fw = QApplication.focusWidget()
+        return fw is not None and self.panel.isAncestorOf(fw) and not self._is_text_input_focused()
+
     def eventFilter(self, obj, event):
         if QApplication.activePopupWidget() is not None:
             return False
@@ -452,6 +488,23 @@ class MainWindow(QMainWindow):
         key = event.key()
         ctrl = bool(event.modifiers() & Qt.ControlModifier)
 
+        if ctrl and key == Qt.Key_Z:
+            if event.modifiers() & Qt.ShiftModifier:
+                self.redo()
+            else:
+                self.undo()
+            return True
+        if ctrl and key == Qt.Key_Y:
+            self.redo()
+            return True
+        if key == Qt.Key_Space:
+            self._toggle_play()
+            return True
+        if key == Qt.Key_F11:
+            self._toggle_fullscreen()
+            return True
+        if self._tree_has_focus():
+            return False  # arrows / delete / ctrl+x/c/v / enter -> tree handles them
         if key == Qt.Key_Left:
             self._seek(-30 if ctrl else -5)
             return True
@@ -464,11 +517,6 @@ class MainWindow(QMainWindow):
             self._right_timer.timeout.connect(self._enter_turbo)
             self._right_timer.start(TURBO_HOLD_MS)
             return True
-        if key == Qt.Key_Space:
-            if isinstance(QApplication.focusWidget(), QAbstractButton):
-                return False
-            self._toggle_play()
-            return True
         if key == Qt.Key_Up:
             if self.player:
                 self.player.set_volume(self.player.get_volume() + 5)
@@ -479,22 +527,12 @@ class MainWindow(QMainWindow):
                 self.player.set_volume(self.player.get_volume() - 5)
                 self.controls.set_volume_display(self.player.get_volume())
             return True
-        if key == Qt.Key_F11:
-            self._toggle_fullscreen()
-            return True
-        if ctrl and key == Qt.Key_Z:
-            if event.modifiers() & Qt.ShiftModifier:
-                self.redo()
-            else:
-                self.undo()
-            return True
-        if ctrl and key == Qt.Key_Y:
-            self.redo()
-            return True
         return False
 
     def _on_key_release(self, event):
         if self._is_text_input_focused():
+            return False
+        if self._tree_has_focus():
             return False
         if event.key() == Qt.Key_Right and not event.isAutoRepeat():
             if self._turbo_active:

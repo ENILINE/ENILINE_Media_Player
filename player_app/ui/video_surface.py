@@ -10,5 +10,6 @@ class VideoSurface(QWidget):
         # Keep a stable native window handle so mpv's wid stays valid.
         self.setAttribute(Qt.WA_NativeWindow, True)
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.setMinimumSize(320, 180)
+        # ClickFocus so clicking the video gives it focus (focus-aware arrows).
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setMinimumSize(160, 90)

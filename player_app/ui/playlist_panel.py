@@ -2,15 +2,13 @@ import os
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
+    QAbstractItemDelegate,
     QAbstractItemView,
     QFileDialog,
-    QHBoxLayout,
-    QListWidget,
-    QListWidgetItem,
     QMenu,
     QMessageBox,
-    QPushButton,
-    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -33,6 +31,16 @@ def collect_media_files(directory: str) -> list[str]:
     return out
 
 
+class _Tree(QTreeWidget):
+    def __init__(self, panel):
+        super().__init__()
+        self._panel = panel
+
+    def keyPressEvent(self, event):
+        if not self._panel._tree_key(event):
+            super().keyPressEvent(event)
+
+
 class PlaylistPanel(QWidget):
     playlist_selected = pyqtSignal(str)
     play_requested = pyqtSignal(str, int)
@@ -41,158 +49,280 @@ class PlaylistPanel(QWidget):
     copy_requested = pyqtSignal(str, list)
     paste_requested = pyqtSignal(str)
     remove_requested = pyqtSignal(str, list)
-    rename_entry_requested = pyqtSignal(str, int)
-    create_requested = pyqtSignal()
+    create_requested = pyqtSignal(str)
     delete_requested = pyqtSignal(str)
-    rename_requested = pyqtSignal(str)
+    rename_list_requested = pyqtSignal(str, str)
     copy_list_requested = pyqtSignal(str)
+    rename_entry_requested = pyqtSignal(str, int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._updating = False
+        self._pending = None  # inline-edit context dict
+        self._expanded_pids = set()
         self.current_pid = None
         self._build()
 
     def _build(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        self.tree = _Tree(self)
+        self.tree.setHeaderHidden(True)
+        self.tree.setRootIsDecorated(True)
+        self.tree.setAnimated(True)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
+        self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.tree.itemChanged.connect(self._on_item_changed)
+        self.tree.itemExpanded.connect(self._on_item_expanded)
+        self.tree.itemCollapsed.connect(self._on_item_collapsed)
+        self.tree.itemDelegate().closeEditor.connect(self._on_editor_closed)
+        self.tree.setAcceptDrops(True)
+        self.tree.setDragEnabled(False)
+        self.tree.setDefaultDropAction(Qt.CopyAction)
+        self.tree.setMinimumWidth(80)
+        outer.addWidget(self.tree)
+        self.setMinimumWidth(0)
 
-        split = QSplitter(Qt.Horizontal)
+    # -- model -> view -------------------------------------------------------
+    def _on_item_expanded(self, item):
+        pid = item.data(0, Qt.UserRole)
+        if pid:
+            self._expanded_pids.add(pid)
 
-        # -- left: playlist list + actions ---------------------------------
-        left = QWidget()
-        lv = QVBoxLayout(left)
-        lv.setContentsMargins(0, 0, 0, 0)
-        self.list_list = QListWidget()
-        self.list_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.list_list.itemSelectionChanged.connect(self._on_list_selection)
-        self.list_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.list_list.customContextMenuRequested.connect(self._list_menu)
-        lv.addWidget(self.list_list, 1)
+    def _on_item_collapsed(self, item):
+        pid = item.data(0, Qt.UserRole)
+        if pid:
+            self._expanded_pids.discard(pid)
 
-        btns = QHBoxLayout()
-        self.new_btn = QPushButton("新建")
-        self.del_btn = QPushButton("删除")
-        self.ren_btn = QPushButton("重命名")
-        self.cpy_btn = QPushButton("复制")
-        for b in (self.new_btn, self.del_btn, self.ren_btn, self.cpy_btn):
-            b.setFocusPolicy(Qt.NoFocus)
-            btns.addWidget(b)
-        self.new_btn.clicked.connect(self.create_requested.emit)
-        self.del_btn.clicked.connect(lambda: self._current_pid() and self.delete_requested.emit(self._current_pid()))
-        self.ren_btn.clicked.connect(lambda: self._current_pid() and self.rename_requested.emit(self._current_pid()))
-        self.cpy_btn.clicked.connect(lambda: self._current_pid() and self.copy_list_requested.emit(self._current_pid()))
-        lv.addLayout(btns)
-
-        # -- right: entries --------------------------------------------------
-        right = QWidget()
-        rv = QVBoxLayout(right)
-        rv.setContentsMargins(0, 0, 0, 0)
-        self.entry_list = QListWidget()
-        self.entry_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.entry_list.itemDoubleClicked.connect(self._on_entry_activated)
-        self.entry_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.entry_list.customContextMenuRequested.connect(self._entry_menu)
-        self.entry_list.setAcceptDrops(True)
-        self.entry_list.setDragEnabled(False)
-        self.entry_list.setDefaultDropAction(Qt.CopyAction)
-        rv.addWidget(self.entry_list, 1)
-
-        split.addWidget(left)
-        split.addWidget(right)
-        split.setSizes([220, 380])
-        outer.addWidget(split)
-
-    # -- helpers ------------------------------------------------------------
-    def _current_pid(self):
-        row = self.list_list.currentRow()
-        if row < 0:
-            return None
-        return self._pid_by_row(row)
-
-    def _pid_by_row(self, row):
-        item = self.list_list.item(row)
-        return item.data(Qt.UserRole) if item else None
-
-    def _selected_rows(self):
-        return sorted(i.row() for i in self.entry_list.selectedIndexes())
-
-    def _entry_at(self, row):
-        item = self.entry_list.item(row)
-        return item.data(Qt.UserRole) if item else None
-
-    # -- model -> view ------------------------------------------------------
     def refresh(self, collection, current_pid, current_index):
         self._updating = True
+        self.tree.blockSignals(True)
         try:
-            self.list_list.blockSignals(True)
-            self.list_list.clear()
+            self.tree.clear()
+            selected_pl = None
+            selected_entry = None
             for pl in collection.playlists:
-                item = QListWidgetItem(pl.name)
-                item.setData(Qt.UserRole, pl.id)
-                self.list_list.addItem(item)
-            row = collection.index_of(current_pid) if current_pid else -1
-            self.list_list.setCurrentRow(max(row, 0))
-            self.list_list.blockSignals(False)
-
-            self.entry_list.clear()
-            pl = collection.find(current_pid) if current_pid else None
-            if pl:
+                pl_item = QTreeWidgetItem([pl.name])
+                pl_item.setData(0, Qt.UserRole, pl.id)
+                pl_item.setFlags(pl_item.flags() | Qt.ItemIsEditable)
+                pl_item.setToolTip(0, pl.name)
+                self.tree.addTopLevelItem(pl_item)
                 for idx, e in enumerate(pl.entries):
-                    item = QListWidgetItem(e.display_name)
-                    item.setData(Qt.UserRole, idx)
-                    item.setToolTip(e.path)
-                    self.entry_list.addItem(item)
-                if current_index is not None and 0 <= current_index < len(pl.entries):
-                    self.entry_list.setCurrentRow(current_index)
+                    en_item = QTreeWidgetItem([e.display_name])
+                    en_item.setData(0, Qt.UserRole, idx)
+                    en_item.setFlags(en_item.flags() | Qt.ItemIsEditable)
+                    en_item.setToolTip(0, e.path)
+                    pl_item.addChild(en_item)
+                if pl.id in self._expanded_pids:
+                    pl_item.setExpanded(True)
+                if pl.id == current_pid:
+                    selected_pl = pl_item
+                    if current_index is not None and 0 <= current_index < len(pl.entries):
+                        selected_entry = pl_item.child(current_index)
+            if selected_pl:
+                selected_pl.setExpanded(True)
+                self.tree.setCurrentItem(selected_entry if selected_entry else selected_pl)
         finally:
+            self.tree.blockSignals(False)
             self._updating = False
+        self.current_pid = current_pid
 
-    # -- user interactions ----------------------------------------------------
-    def _on_list_selection(self):
+    # -- selection / data helpers ----------------------------------------------
+    def _current_item(self):
+        return self.tree.currentItem()
+
+    def _pid_of_item(self, item):
+        if item is None:
+            return None
+        if item.parent() is None:
+            return item.data(0, Qt.UserRole)
+        return item.parent().data(0, Qt.UserRole)
+
+    def _selected_playlist_pid(self):
+        cur = self._current_item()
+        if cur is None:
+            return None
+        if cur.parent() is None:
+            return cur.data(0, Qt.UserRole)
+        return cur.parent().data(0, Qt.UserRole)
+
+    def _selected_entry_data(self):
+        """Return (pid, [indices]) for entry items selected under the current playlist."""
+        cur = self._current_item()
+        if cur is None or cur.parent() is None:
+            return None
+        pl_item = cur.parent()
+        pid = pl_item.data(0, Qt.UserRole)
+        indices = []
+        for item in self.tree.selectedItems():
+            if item.parent() is pl_item:
+                idx = item.data(0, Qt.UserRole)
+                if idx is not None:
+                    indices.append(idx)
+        return pid, sorted(set(indices))
+
+    # -- user interaction ------------------------------------------------------
+    def _on_selection_changed(self):
         if self._updating:
             return
-        pid = self._current_pid()
+        pid = self._selected_playlist_pid()
         if pid:
             self.playlist_selected.emit(pid)
 
-    def _on_entry_activated(self, item):
-        pid = self._current_pid()
-        if pid and item:
-            self.play_requested.emit(pid, item.data(Qt.UserRole))
-
-    def _list_menu(self, pos):
-        menu = QMenu(self)
-        menu.addAction("新建列表", self.create_requested.emit)
-        pid = self._current_pid()
-        if pid:
-            menu.addSeparator()
-            menu.addAction("重命名", lambda: self.rename_requested.emit(pid))
-            menu.addAction("复制", lambda: self.copy_list_requested.emit(pid))
-            menu.addAction("删除", lambda: self.delete_requested.emit(pid))
-        menu.exec_(self.list_list.mapToGlobal(pos))
-
-    def _entry_menu(self, pos):
-        pid = self._current_pid()
-        if not pid:
+    def _on_item_double_clicked(self, item, _col):
+        if item.parent() is None:
             return
-        rows = self._selected_rows()
-        menu = QMenu(self)
-        menu.addAction("添加文件", self._add_files)
-        menu.addAction("添加目录", self._add_directory)
-        menu.addSeparator()
-        if rows:
-            menu.addAction("剪切", lambda: self.cut_requested.emit(pid, rows))
-            menu.addAction("复制", lambda: self.copy_requested.emit(pid, rows))
-        menu.addAction("粘贴", lambda: self.paste_requested.emit(pid))
-        if rows:
-            menu.addSeparator()
-            menu.addAction("重命名", lambda: self.rename_entry_requested.emit(pid, rows[0]))
-            menu.addAction("删除", lambda: self.remove_requested.emit(pid, rows))
-        menu.exec_(self.entry_list.mapToGlobal(pos))
+        pid = item.parent().data(0, Qt.UserRole)
+        idx = item.data(0, Qt.UserRole)
+        if pid is not None and idx is not None:
+            self.play_requested.emit(pid, idx)
 
+    def _tree_key(self, event):
+        key = event.key()
+        if key == Qt.Key_Delete:
+            self._delete_selection()
+            return True
+        if key == Qt.Key_F2:
+            self._rename_current()
+            return True
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            cur = self._current_item()
+            if cur is not None and cur.parent() is not None:
+                pid = cur.parent().data(0, Qt.UserRole)
+                idx = cur.data(0, Qt.UserRole)
+                if pid is not None and idx is not None:
+                    self.play_requested.emit(pid, idx)
+                    return True
+        mods = event.modifiers()
+        if mods & Qt.ControlModifier:
+            if key == Qt.Key_X:
+                self._cut()
+                return True
+            if key == Qt.Key_C:
+                self._copy()
+                return True
+            if key == Qt.Key_V:
+                self._paste()
+                return True
+        return False
+
+    def _delete_selection(self):
+        data = self._selected_entry_data()
+        if data:
+            pid, indices = data
+            self.remove_requested.emit(pid, indices)
+            return
+        pid = self._selected_playlist_pid()
+        if pid:
+            self.delete_requested.emit(pid)
+
+    def _rename_current(self):
+        cur = self._current_item()
+        if cur is None:
+            return
+        if cur.parent() is None:
+            self._pending = {
+                "item": cur, "kind": "rename_playlist", "pid": cur.data(0, Qt.UserRole),
+                "old": cur.text(0),
+            }
+        else:
+            self._pending = {
+                "item": cur, "kind": "rename_entry", "pid": cur.parent().data(0, Qt.UserRole),
+                "index": cur.data(0, Qt.UserRole), "old": cur.text(0),
+            }
+        self.tree.editItem(cur)
+
+    def _cut(self):
+        data = self._selected_entry_data()
+        if data:
+            self.cut_requested.emit(*data)
+
+    def _copy(self):
+        data = self._selected_entry_data()
+        if data:
+            self.copy_requested.emit(*data)
+
+    def _paste(self):
+        pid = self._selected_playlist_pid()
+        if pid:
+            self.paste_requested.emit(pid)
+
+    # -- context menu ----------------------------------------------------------
+    def _context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        menu = QMenu(self)
+        menu.addAction("新建列表", self._create_inline)
+        if item is not None:
+            pid = self._pid_of_item(item)
+            if pid:
+                menu.addSeparator()
+            if item.parent() is None:
+                menu.addAction("重命名", self._rename_current)
+                menu.addAction("复制", lambda: self.copy_list_requested.emit(pid))
+                menu.addAction("删除", lambda: self.delete_requested.emit(pid))
+            else:
+                menu.addAction("添加文件", self._add_files)
+                menu.addAction("添加目录", self._add_directory)
+                menu.addSeparator()
+                menu.addAction("剪切", self._cut)
+                menu.addAction("复制", self._copy)
+                menu.addAction("粘贴", self._paste)
+                menu.addSeparator()
+                menu.addAction("重命名", self._rename_current)
+                menu.addAction("删除", self._delete_selection)
+        menu.exec_(self.tree.viewport().mapToGlobal(pos))
+
+    def _create_inline(self):
+        item = QTreeWidgetItem(["新建列表"])
+        item.setFlags(item.flags() | Qt.ItemIsEditable)
+        self.tree.addTopLevelItem(item)
+        self.tree.setCurrentItem(item)
+        self._pending = {"item": item, "kind": "create", "old": item.text(0)}
+        self.tree.editItem(item)
+
+    # -- inline edit commit ----------------------------------------------------
+    def _on_item_changed(self, item, col):
+        if self._updating:
+            return
+        p = self._pending
+        if not p or p["item"] is not item:
+            return
+        text = item.text(0).strip()
+        kind = p["kind"]
+        if kind == "create":
+            if text and text != p["old"]:
+                self.create_requested.emit(text)
+            self._pending = None
+        elif kind == "rename_playlist":
+            if text and text != p["old"]:
+                self.rename_list_requested.emit(p["pid"], text)
+            self._pending = None
+        elif kind == "rename_entry":
+            if text and text != p["old"]:
+                self.rename_entry_requested.emit(p["pid"], p["index"], text)
+            self._pending = None
+
+    def _on_editor_closed(self, editor, hint):
+        p = self._pending
+        if not p:
+            return
+        if hint == QAbstractItemDelegate.RevertModelCache:
+            if p["kind"] == "create":
+                idx = self.tree.indexOfTopLevelItem(p["item"])
+                if idx >= 0:
+                    self.tree.takeTopLevelItem(idx)
+            self._pending = None
+        elif hint == QAbstractItemDelegate.NoHint:
+            # committed; itemChanged normally handled it, but clear if unchanged.
+            self._pending = None
+
+    # -- add files / directory --------------------------------------------------
     def _add_files(self):
-        pid = self._current_pid()
+        pid = self._selected_playlist_pid()
         if not pid:
             return
         files, _ = QFileDialog.getOpenFileNames(self, "添加文件", "", MEDIA_FILTER)
@@ -200,7 +330,7 @@ class PlaylistPanel(QWidget):
             self.add_paths_requested.emit(pid, files)
 
     def _add_directory(self):
-        pid = self._current_pid()
+        pid = self._selected_playlist_pid()
         if not pid:
             return
         directory = QFileDialog.getExistingDirectory(self, "添加目录")
@@ -211,7 +341,7 @@ class PlaylistPanel(QWidget):
                 return
             self.add_paths_requested.emit(pid, files)
 
-    # -- drag & drop from Explorer --------------------------------------------
+    # -- drag & drop from Explorer ----------------------------------------------
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -223,7 +353,8 @@ class PlaylistPanel(QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        pid = self._current_pid()
+        item = self.tree.itemAt(event.pos())
+        pid = self._pid_of_item(item) or self.current_pid
         if not pid:
             return
         paths = []
