@@ -18,3 +18,7 @@ bin/7zr.exe
 .idea/
 Thumbs.db
 Desktop.ini
+
+*.md
+
+!README.md
