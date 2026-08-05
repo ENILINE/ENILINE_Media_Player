@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Build outputs
+build/
+dist/
+
+# Large vendored binary (fetch with scripts/fetch_libmpv.py)
+bin/libmpv-2.dll
+bin/7zr.exe
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
