@@ -1,6 +1,7 @@
 import os
 
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QPalette
 from PyQt5.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -81,6 +82,10 @@ class PlaylistPanel(QWidget):
         self.tree.setRootIsDecorated(True)
         self.tree.setAnimated(True)
         self.tree.setUniformRowHeights(True)
+        pal = self.tree.palette()
+        pal.setColor(QPalette.Text, QColor("#e0e0e0"))
+        pal.setColor(QPalette.ButtonText, QColor("#e0e0e0"))
+        self.tree.setPalette(pal)
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
@@ -189,6 +194,7 @@ class PlaylistPanel(QWidget):
 
     def _on_item_double_clicked(self, item, _col):
         if item.parent() is None:
+            item.setExpanded(not item.isExpanded())
             return
         pid = item.parent().data(0, Qt.UserRole)
         idx = item.data(0, Qt.UserRole)
@@ -400,7 +406,11 @@ class PlaylistPanel(QWidget):
         paths = []
         for url in event.mimeData().urls():
             p = url.toLocalFile()
-            if p and is_media_file(p):
+            if not p:
+                continue
+            if os.path.isdir(p):
+                paths.extend(collect_media_files(p))
+            elif is_media_file(p):
                 paths.append(p)
         if paths:
             self.add_paths_requested.emit(pid, paths)

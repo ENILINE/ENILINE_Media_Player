@@ -71,6 +71,7 @@ QTreeWidget {
     background: #252526;
     border: none;
     outline: none;
+    color: #e0e0e0;
 }
 QTreeWidget::item {
     height: 32px;
@@ -84,7 +85,15 @@ QTreeWidget::item:selected {
     background: #094771;
 }
 QTreeWidget::branch {
-    background: transparent;
+    background: #252526;
+}
+QTreeWidget::branch:has-children:!has-siblings:closed,
+QTreeWidget::branch:closed:has-children:has-siblings {
+    border-image: none;
+}
+QTreeWidget::branch:open:has-children:!has-siblings,
+QTreeWidget::branch:open:has-children:has-siblings {
+    border-image: none;
 }
 
 QMenu {

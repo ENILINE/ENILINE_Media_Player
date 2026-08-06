@@ -71,6 +71,10 @@ class MainWindow(QMainWindow):
         self._refresh_queued = False
 
         self._startup_paths = startup_paths or []
+        self._fullscreen_hide_timer = QTimer(self)
+        self._fullscreen_hide_timer.setSingleShot(True)
+        self._fullscreen_hide_timer.timeout.connect(self._hide_controls_fs)
+        self._controls_hovered = False
 
         self._build_ui()
         self._load_settings()
@@ -124,6 +128,7 @@ class MainWindow(QMainWindow):
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         central = QWidget()
+        central.setMouseTracking(True)
         v = QVBoxLayout(central)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -135,6 +140,15 @@ class MainWindow(QMainWindow):
         self.panel.update()
         self.panel.tree.update()
         self.video_surface.update()
+
+    def _hide_controls_fs(self):
+        if self.isFullScreen() and not self._controls_hovered:
+            self.controls.hide()
+
+    def _show_controls_fs(self):
+        if self.isFullScreen():
+            self.controls.show()
+            self._fullscreen_hide_timer.start(1500)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -329,6 +343,8 @@ class MainWindow(QMainWindow):
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
+            self._fullscreen_hide_timer.stop()
+            self.controls.show()
             self.showNormal()
             self.panel.show()
             self.controls.set_fullscreen(False)
@@ -336,6 +352,8 @@ class MainWindow(QMainWindow):
             self.panel.hide()
             self.showFullScreen()
             self.controls.set_fullscreen(True)
+            self.controls.show()
+            self._fullscreen_hide_timer.start(1500)
 
     def play_index(self, pid, index):
         self._play_index(pid, index)
@@ -470,12 +488,19 @@ class MainWindow(QMainWindow):
             temp_pid = self._temp_list_pid()
             if temp_pid:
                 self._run(add_entries_cmd(self.collection, temp_pid, entries))
+                if not self._current_path:
+                    self._play_index(temp_pid, 0)
 
     def add_paths(self, pid, paths):
         entries = [Entry(p) for p in paths if p and is_media_file(p)]
         if not entries:
             return
+        was_empty = not self._current_path
+        pl = self.collection.find(pid)
+        old_len = len(pl.entries) if pl else 0
         self._run(add_entries_cmd(self.collection, pid, entries))
+        if was_empty and pl and pl.is_temp:
+            self._play_index(pid, old_len)
 
     def remove_entries(self, pid, indices):
         cmd = remove_entries_cmd(self.collection, pid, indices)
@@ -561,6 +586,10 @@ class MainWindow(QMainWindow):
             if self._right_timer:
                 self._right_timer.stop()
             self._right_timer = None
+        if event.type() == QEvent.MouseMove and self.isFullScreen():
+            self._show_controls_fs()
+            local = self.controls.mapFromGlobal(event.globalPos())
+            self._controls_hovered = self.controls.rect().contains(local)
         if event.type() == QEvent.KeyPress:
             return self._on_key_press(event)
         if event.type() == QEvent.KeyRelease:
@@ -588,6 +617,9 @@ class MainWindow(QMainWindow):
         if key == Qt.Key_F11:
             self._toggle_fullscreen()
             return True
+        if key == Qt.Key_Escape and self.isFullScreen():
+            self._toggle_fullscreen()
+            return True
         if self._tree_has_focus():
             return False  # arrows / delete / ctrl+x/c/v / enter -> tree handles them
         if key == Qt.Key_Left:
@@ -607,8 +639,9 @@ class MainWindow(QMainWindow):
                 if self.player.is_muted():
                     self.player.set_mute(False)
                     self.controls.set_muted_display(False)
-                self.player.set_volume(self.player.get_volume() + 5)
-                self.controls.set_volume_display(self.player.get_volume())
+                v = min(self.player.get_volume() + 5, 150)
+                self.player.set_volume(v)
+                self.controls.set_volume_display(v)
             return True
         if key == Qt.Key_Down:
             if self.player:

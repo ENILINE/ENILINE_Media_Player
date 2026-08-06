@@ -1,4 +1,5 @@
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import QWidget
 
 
@@ -14,6 +15,12 @@ class VideoSurface(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(160, 90)
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#1e1e1e"))
+        p.end()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():

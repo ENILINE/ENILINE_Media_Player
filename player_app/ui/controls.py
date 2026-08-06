@@ -215,7 +215,7 @@ class Controls(QWidget):
     def set_volume_display(self, v: int):
         self._updating = True
         try:
-            self.vol_slider.setValue(int(v))
+            self.vol_slider.setValue(min(int(v), 100))
         finally:
             self._updating = False
         self.vol_label.setText(str(int(v)))
