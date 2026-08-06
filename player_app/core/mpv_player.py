@@ -95,7 +95,7 @@ class MpvPlayer:
         return int(v) if v is not None else 0
 
     def set_volume(self, v: int):
-        v = max(0, min(int(v), 150))
+        v = max(0, min(int(v), 130))
         self._player.command("set", "volume", str(v))
 
     def toggle_mute(self):

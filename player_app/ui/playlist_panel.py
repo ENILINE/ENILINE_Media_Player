@@ -1,15 +1,18 @@
 import os
 
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPalette
+from PyQt5.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QPainter, QPalette, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
+    QCommonStyle,
     QFileDialog,
     QLineEdit,
     QMenu,
     QMessageBox,
+    QStyle,
     QStyledItemDelegate,
+    QStyleOption,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -41,14 +44,75 @@ class _RenameDelegate(QStyledItemDelegate):
         return editor
 
 
+class _BranchStyle(QCommonStyle):
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element == QStyle.PE_IndicatorBranch:
+            if not (option.state & QStyle.State_Children):
+                return  # leaf node, draw nothing
+            mid = option.rect.center()
+            painter.save()
+            pen = QPen(QColor("#a0a0a0"))
+            pen.setWidthF(1.5)
+            painter.setPen(pen)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            sz = 4
+            if option.state & QStyle.State_Open:
+                tri = QPolygonF([
+                    QPoint(mid.x() - sz, mid.y() - sz // 2),
+                    QPoint(mid.x() + sz, mid.y() - sz // 2),
+                    QPoint(mid.x(), mid.y() + sz),
+                ])
+            else:
+                tri = QPolygonF([
+                    QPoint(mid.x() - sz // 2, mid.y() - sz),
+                    QPoint(mid.x() + sz, mid.y()),
+                    QPoint(mid.x() - sz // 2, mid.y() + sz),
+                ])
+            painter.drawLine(tri[0].toPoint(), tri[1].toPoint())
+            painter.drawLine(tri[1].toPoint(), tri[2].toPoint())
+            painter.drawLine(tri[2].toPoint(), tri[0].toPoint())
+            painter.restore()
+            return
+        super().drawPrimitive(element, option, painter, widget)
+
+
 class _Tree(QTreeWidget):
     def __init__(self, panel):
         super().__init__()
         self._panel = panel
+        self.setStyle(_BranchStyle())
 
     def keyPressEvent(self, event):
         if not self._panel._tree_key(event):
             super().keyPressEvent(event)
+
+    # -- drag & drop ----------------------------------------------------------
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        item = self.itemAt(event.pos())
+        pid = self._panel._pid_of_item(item) or self._panel.current_pid
+        if not pid:
+            return
+        paths = []
+        for url in event.mimeData().urls():
+            p = url.toLocalFile()
+            if not p:
+                continue
+            if os.path.isdir(p):
+                paths.extend(collect_media_files(p))
+            elif is_media_file(p):
+                paths.append(p)
+        if paths:
+            self._panel.add_paths_requested.emit(pid, paths)
 
 
 class PlaylistPanel(QWidget):
@@ -90,12 +154,14 @@ class PlaylistPanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.itemExpanded.connect(self._on_item_expanded)
         self.tree.itemCollapsed.connect(self._on_item_collapsed)
         self.tree.setItemDelegate(_RenameDelegate(self.tree))
         self.tree.itemDelegate().closeEditor.connect(self._on_editor_closed)
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tree.setAcceptDrops(True)
         self.tree.setDragEnabled(False)
         self.tree.setDefaultDropAction(Qt.CopyAction)
@@ -192,9 +258,12 @@ class PlaylistPanel(QWidget):
         if pid:
             self.playlist_selected.emit(pid)
 
-    def _on_item_double_clicked(self, item, _col):
+    def _on_item_clicked(self, item, _col):
         if item.parent() is None:
             item.setExpanded(not item.isExpanded())
+
+    def _on_item_double_clicked(self, item, _col):
+        if item.parent() is None:
             return
         pid = item.parent().data(0, Qt.UserRole)
         idx = item.data(0, Qt.UserRole)
@@ -387,30 +456,3 @@ class PlaylistPanel(QWidget):
                 return
             self.add_paths_requested.emit(pid, files)
 
-    # -- drag & drop from Explorer ----------------------------------------------
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        item = self.tree.itemAt(event.pos())
-        pid = self._pid_of_item(item) or self.current_pid
-        if not pid:
-            return
-        paths = []
-        for url in event.mimeData().urls():
-            p = url.toLocalFile()
-            if not p:
-                continue
-            if os.path.isdir(p):
-                paths.extend(collect_media_files(p))
-            elif is_media_file(p):
-                paths.append(p)
-        if paths:
-            self.add_paths_requested.emit(pid, paths)

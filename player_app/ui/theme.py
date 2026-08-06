@@ -84,17 +84,6 @@ QTreeWidget::item:hover {
 QTreeWidget::item:selected {
     background: #094771;
 }
-QTreeWidget::branch {
-    background: #252526;
-}
-QTreeWidget::branch:has-children:!has-siblings:closed,
-QTreeWidget::branch:closed:has-children:has-siblings {
-    border-image: none;
-}
-QTreeWidget::branch:open:has-children:!has-siblings,
-QTreeWidget::branch:open:has-children:has-siblings {
-    border-image: none;
-}
 
 QMenu {
     background: #252526;

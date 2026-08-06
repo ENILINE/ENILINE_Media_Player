@@ -639,7 +639,7 @@ class MainWindow(QMainWindow):
                 if self.player.is_muted():
                     self.player.set_mute(False)
                     self.controls.set_muted_display(False)
-                v = min(self.player.get_volume() + 5, 150)
+                v = min(self.player.get_volume() + 5, 130)
                 self.player.set_volume(v)
                 self.controls.set_volume_display(v)
             return True
