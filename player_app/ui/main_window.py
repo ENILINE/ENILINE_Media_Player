@@ -1,6 +1,7 @@
 import random
 
 from PyQt5.QtCore import QEvent, Qt, QTimer
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -8,9 +9,11 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QSplitter,
+    QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -27,6 +30,8 @@ from ..core.commands import (
     rename_playlist_cmd,
     UndoRedoStack,
 )
+from ..core.global_hotkeys import GlobalHotkeyManager
+from ..core.ipc import IPCServer
 from ..core.mpv_player import MpvPlayer
 from ..core.playlist_model import Entry, Playlist, PlaylistCollection, is_media_file
 from ..core.speed import speed_for_turbo
@@ -76,6 +81,32 @@ class MainWindow(QMainWindow):
         self._fullscreen_hide_timer.timeout.connect(self._hide_controls_fs)
         self._controls_hovered = False
 
+        self._close_to_tray = False
+        self._subtitle_enabled = True
+        self._subtitle_style = 1
+        self._subtitle_pos = 100
+        self._volume_normalization = False
+        self._hotkey_settings = {"play": "", "prev": "", "next": ""}
+
+        app = QApplication.instance()
+        self._hotkey_mgr = GlobalHotkeyManager(self)
+        app.installNativeEventFilter(self._hotkey_mgr)
+        self._hotkey_mgr.play_pause_pressed.connect(self._toggle_play)
+        self._hotkey_mgr.prev_pressed.connect(self._play_prev)
+        self._hotkey_mgr.next_pressed.connect(self._play_next)
+
+        self._ipc_server = IPCServer(self)
+        self._ipc_server.paths_received.connect(self._on_remote_paths)
+
+        icon = app.windowIcon() if hasattr(app, "windowIcon") else QIcon()
+        self._tray = QSystemTrayIcon(self)
+        if not icon.isNull():
+            self._tray.setIcon(icon)
+        self._tray.setToolTip("ENILINE Media Player")
+        self._tray.activated.connect(self._on_tray_activated)
+        self._build_tray_menu()
+        self._tray.show()
+
         self._build_ui()
         self._load_settings()
         if self._pending_splitter_sizes:
@@ -83,7 +114,6 @@ class MainWindow(QMainWindow):
         self._wire_controls()
         self._refresh_panel()
 
-        app = QApplication.instance()
         app.installEventFilter(self)
 
         self._resume_timer = QTimer(self)
@@ -104,6 +134,10 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         self.video_surface = VideoSurface()
         self.video_surface.files_dropped.connect(self._on_video_drop)
+        self.video_surface.settings_requested.connect(self._open_settings)
+        self.video_surface.about_requested.connect(self._show_about)
+        self.video_surface.browse_file_requested.connect(self._browse_file)
+        self.video_surface.file_properties_requested.connect(self._file_properties)
         self.controls = Controls()
 
         self.panel = PlaylistPanel()
@@ -119,6 +153,14 @@ class MainWindow(QMainWindow):
         self.panel.rename_list_requested.connect(self.rename_playlist)
         self.panel.copy_list_requested.connect(self.copy_playlist)
         self.panel.rename_entry_requested.connect(self.rename_entry)
+        self.panel.browse_file_requested.connect(self._browse_file)
+        self.panel.file_properties_requested.connect(self._file_properties)
+        self.panel.clean_invalid_requested.connect(self._clean_invalid)
+        self.panel.dedupe_requested.connect(self._dedupe)
+        self.panel.sort_by_name_requested.connect(self._sort_by_name)
+        self.panel.sort_by_mtime_requested.connect(self._sort_by_mtime)
+        self.panel.sort_by_duration_requested.connect(self._sort_by_duration)
+        self.panel.shuffle_requested.connect(self._shuffle_list)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setHandleWidth(3)
@@ -157,8 +199,14 @@ class MainWindow(QMainWindow):
         if self.player is None:
             self.player = MpvPlayer(self.video_surface.winId())
             self.player.set_volume(self._stored_volume)
+            if not self._subtitle_enabled:
+                self.player.set_sub_visibility(False)
+            self.player.apply_subtitle_style(self._subtitle_style)
+            self.player.set_sub_pos(self._subtitle_pos)
+            self.player.set_volume_normalization(self._volume_normalization)
             self._connect_player()
             self._process_startup_paths()
+            self._apply_hotkeys()
 
     def _process_startup_paths(self):
         if not self._startup_paths:
@@ -204,7 +252,9 @@ class MainWindow(QMainWindow):
         s.paused_changed.connect(self._on_pause_changed)
         s.file_loaded.connect(self._on_file_loaded)
         s.eof_reached.connect(self._on_eof)
+        s.playback_error.connect(self._on_playback_error)
         self.controls.seek_requested.connect(self._on_controls_seek)
+        self._error_count = 0
 
     def _wire_controls(self):
         self.controls.play_toggled.connect(self._toggle_play)
@@ -242,6 +292,16 @@ class MainWindow(QMainWindow):
             self._pending_splitter_sizes = sizes
         else:
             self._pending_splitter_sizes = None
+        self._close_to_tray = st.get("close_to_tray", False)
+        self._subtitle_enabled = st.get("subtitle_enabled", True)
+        self._subtitle_style = st.get("subtitle_style", 1)
+        self._subtitle_pos = st.get("subtitle_pos", 100)
+        self._volume_normalization = st.get("volume_normalization", False)
+        self._hotkey_settings = {
+            "play": st.get("hotkey_play", ""),
+            "prev": st.get("hotkey_prev", ""),
+            "next": st.get("hotkey_next", ""),
+        }
 
     def _update_settings(self, updates: dict):
         data = self.storage.load_settings()
@@ -265,6 +325,8 @@ class MainWindow(QMainWindow):
 
     def _on_file_loaded(self, path):
         self._current_path = path
+        self._error_count = 0
+        self.video_surface.set_current_path(path)
         self.controls.set_playing(True)
         pos = self.storage.load_resume().get(path)
         if pos:
@@ -697,8 +759,225 @@ class MainWindow(QMainWindow):
         self._base_speed = self.player.get_speed()
         self.player.set_speed(speed_for_turbo(self._base_speed))
 
+    # -- context menu actions --------------------------------------------------
+    def _open_settings(self):
+        from .settings_dialog import SettingsDialog
+        settings = {
+            "remember_position": self.storage.load_settings().get("remember_position", True),
+            "subtitle_enabled": self._subtitle_enabled,
+            "subtitle_style": self._subtitle_style,
+            "volume_normalization": self._volume_normalization,
+            "close_to_tray": self._close_to_tray,
+            "hotkey_play": self._hotkey_settings.get("play", ""),
+            "hotkey_prev": self._hotkey_settings.get("prev", ""),
+            "hotkey_next": self._hotkey_settings.get("next", ""),
+        }
+        dlg = SettingsDialog(settings, self)
+        if dlg.exec_():
+            vals = dlg.values()
+            self._subtitle_enabled = vals["subtitle_enabled"]
+            self._subtitle_style = vals["subtitle_style"]
+            self._volume_normalization = vals["volume_normalization"]
+            self._close_to_tray = vals["close_to_tray"]
+            self._hotkey_settings = {
+                "play": vals["hotkey_play"],
+                "prev": vals["hotkey_prev"],
+                "next": vals["hotkey_next"],
+            }
+            self._apply_subtitle_settings()
+            if self.player:
+                self.player.set_volume_normalization(self._volume_normalization)
+            self._apply_hotkeys()
+            self._update_settings({
+                "remember_position": vals["remember_position"],
+                "subtitle_enabled": vals["subtitle_enabled"],
+                "subtitle_style": vals["subtitle_style"],
+                "volume_normalization": vals["volume_normalization"],
+                "close_to_tray": vals["close_to_tray"],
+                "hotkey_play": vals["hotkey_play"],
+                "hotkey_prev": vals["hotkey_prev"],
+                "hotkey_next": vals["hotkey_next"],
+            })
+
+    def _show_about(self):
+        QMessageBox.about(
+            self, "关于",
+            "ENILINE Media Player\n\nhttps://github.com/ENILINE/ENILINE_Media_Player",
+        )
+
+    def _browse_file(self, path):
+        import os as _os
+        if not path or not _os.path.isfile(path):
+            ret = QMessageBox.question(
+                self, "文件不存在",
+                f"找不到文件:\n{path}\n\n是否从列表中删除？",
+            )
+            if ret == QMessageBox.Yes:
+                self._remove_by_path(path)
+            return
+        from .video_surface import open_file_location
+        open_file_location(path)
+
+    def _file_properties(self, path):
+        import os as _os
+        if not path or not _os.path.isfile(path):
+            ret = QMessageBox.question(
+                self, "文件不存在",
+                f"找不到文件:\n{path}\n\n是否从列表中删除？",
+            )
+            if ret == QMessageBox.Yes:
+                self._remove_by_path(path)
+            return
+        from .video_surface import show_file_properties
+        show_file_properties(path)
+
+    def _remove_by_path(self, path):
+        """Remove an entry by path from whatever playlist contains it."""
+        import os as _os
+        norm = _os.path.normcase(path)
+        for pl in self.collection.playlists:
+            for i, e in enumerate(pl.entries):
+                if _os.path.normcase(e.path) == norm:
+                    cmd = remove_entries_cmd(self.collection, pl.id, [i])
+                    if cmd:
+                        self._run(cmd)
+                    return
+
+    def _on_playback_error(self, path):
+        self._error_count += 1
+        pl = self.collection.find(self.playing_pid)
+        total = len(pl.entries) if pl else 0
+        if total > 0 and self._error_count > total:
+            self._error_count = 0
+            if self.player:
+                self.player.pause()
+            QMessageBox.warning(self, "播放失败", "当前列表中所有文件均无法播放。")
+            return
+        ret = QMessageBox.question(
+            self, "播放失败",
+            f"无法播放:\n{path}\n\n是否从列表中删除并跳过？",
+        )
+        if ret == QMessageBox.Yes:
+            self._remove_by_path(path)
+        self._play_next()
+
+    def _clean_invalid(self, pid):
+        pl = self.collection.find(pid)
+        if pl is None:
+            return
+        removed = pl.remove_invalid()
+        self._playlist_op_done(pid, f"已清空 {removed} 个无效文件。")
+
+    def _dedupe(self, pid):
+        pl = self.collection.find(pid)
+        if pl is None:
+            return
+        removed = pl.dedupe()
+        self._playlist_op_done(pid, f"已去重 {removed} 个条目。")
+
+    def _sort_by_name(self, pid):
+        pl = self.collection.find(pid)
+        if pl is None:
+            return
+        pl.sort_by_name()
+        self._playlist_op_done(pid)
+
+    def _sort_by_mtime(self, pid):
+        pl = self.collection.find(pid)
+        if pl is None:
+            return
+        pl.sort_by_mtime()
+        self._playlist_op_done(pid)
+
+    def _sort_by_duration(self, pid):
+        pl = self.collection.find(pid)
+        if pl is None:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            pl.sort_by_duration()
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._playlist_op_done(pid)
+
+    def _shuffle_list(self, pid):
+        pl = self.collection.find(pid)
+        if pl is None:
+            return
+        pl.shuffle()
+        self._playlist_op_done(pid)
+
+    def _playlist_op_done(self, pid, msg=None):
+        self.storage.save_playlists(self.collection)
+        self._refresh_panel()
+        self._save_settings()
+        if msg:
+            self.statusBar().showMessage(msg, 3000)
+
+    # -- tray -----------------------------------------------------------------
+    def _build_tray_menu(self):
+        menu = QMenu()
+        menu.addAction("播完暂停", lambda: self._set_mode_from_tray(0))
+        menu.addAction("列表循环", lambda: self._set_mode_from_tray(1))
+        menu.addAction("单集循环", lambda: self._set_mode_from_tray(2))
+        menu.addAction("随机播放", lambda: self._set_mode_from_tray(3))
+        menu.addSeparator()
+        menu.addAction("退出", self._tray_exit)
+        self._tray.setContextMenu(menu)
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger or reason == QSystemTrayIcon.DoubleClick:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_exit(self):
+        self._close_to_tray = False
+        self.close()
+
+    def _set_mode_from_tray(self, mode: int):
+        self.playback_mode = mode
+        self.controls.set_mode(MODE_LABELS[mode])
+        self._update_settings({"mode": mode})
+
+    # -- IPC ------------------------------------------------------------------
+    def _on_remote_paths(self, paths):
+        entries = self._collect_media_from_paths(paths)
+        if entries:
+            temp_pid = self._temp_list_pid()
+            if temp_pid:
+                self._run(add_entries_cmd(self.collection, temp_pid, entries))
+                if not self._current_path:
+                    self._play_index(temp_pid, 0)
+        self._restore_from_tray()
+
+    # -- hotkeys --------------------------------------------------------------
+    def _apply_hotkeys(self):
+        result = self._hotkey_mgr.apply(int(self.winId()), self._hotkey_settings)
+        self._hotkey_settings = result
+        self._update_settings({
+            "hotkey_play": result.get("play", ""),
+            "hotkey_prev": result.get("prev", ""),
+            "hotkey_next": result.get("next", ""),
+        })
+
+    # -- subtitles ------------------------------------------------------------
+    def _apply_subtitle_settings(self):
+        if self.player:
+            self.player.set_sub_visibility(self._subtitle_enabled)
+            self.player.apply_subtitle_style(self._subtitle_style)
+            self.player.set_sub_pos(self._subtitle_pos)
+
     # -- teardown ---------------------------------------------------------------
     def closeEvent(self, event):
+        if self._close_to_tray:
+            self.hide()
+            event.ignore()
+            return
+        import os as _os
         if self.player:
             self._save_resume()
             self._update_settings({
@@ -706,5 +985,8 @@ class MainWindow(QMainWindow):
                 "splitter_sizes": self.splitter.sizes(),
             })
             self._save_settings()
+            self._hotkey_mgr.unregister_all(int(self.winId()))
+            self._ipc_server.close()
             self.player.shutdown()
+        self._tray.hide()
         super().closeEvent(event)

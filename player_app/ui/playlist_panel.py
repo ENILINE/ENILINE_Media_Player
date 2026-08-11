@@ -128,6 +128,14 @@ class PlaylistPanel(QWidget):
     rename_list_requested = pyqtSignal(str, str)
     copy_list_requested = pyqtSignal(str)
     rename_entry_requested = pyqtSignal(str, int, str)
+    browse_file_requested = pyqtSignal(str)
+    file_properties_requested = pyqtSignal(str)
+    clean_invalid_requested = pyqtSignal(str)
+    dedupe_requested = pyqtSignal(str)
+    sort_by_name_requested = pyqtSignal(str)
+    sort_by_mtime_requested = pyqtSignal(str)
+    sort_by_duration_requested = pyqtSignal(str)
+    shuffle_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -183,6 +191,7 @@ class PlaylistPanel(QWidget):
     TEMP_ROLE = Qt.UserRole + 1
 
     def refresh(self, collection, current_pid, current_index, playing_pid=None):
+        self._collection = collection
         self._updating = True
         self.tree.blockSignals(True)
         try:
@@ -362,6 +371,14 @@ class PlaylistPanel(QWidget):
                 menu.addAction("复制", lambda: self.copy_list_requested.emit(pid))
                 if not is_temp:
                     menu.addAction("删除", lambda: self.delete_requested.emit(pid))
+                menu.addSeparator()
+                ops = menu.addMenu("列表操作")
+                ops.addAction("清空无效文件", lambda: self.clean_invalid_requested.emit(pid))
+                ops.addAction("去重", lambda: self.dedupe_requested.emit(pid))
+                ops.addAction("按名字排序", lambda: self.sort_by_name_requested.emit(pid))
+                ops.addAction("按文件时间排序", lambda: self.sort_by_mtime_requested.emit(pid))
+                ops.addAction("按长度排序", lambda: self.sort_by_duration_requested.emit(pid))
+                ops.addAction("随机排序", lambda: self.shuffle_requested.emit(pid))
             else:
                 menu.addAction("添加文件", self._add_files)
                 menu.addAction("添加目录", self._add_directory)
@@ -372,11 +389,29 @@ class PlaylistPanel(QWidget):
                 menu.addSeparator()
                 menu.addAction("重命名", self._rename_current)
                 menu.addAction("删除", self._delete_selection)
+                menu.addSeparator()
+                path = self._entry_path(item)
+                menu.addAction("浏览文件", lambda: self.browse_file_requested.emit(path))
+                menu.addAction("文件属性", lambda: self.file_properties_requested.emit(path))
         else:
             pid = self.current_pid
             menu.addAction("添加文件", lambda: self._add_files_to(pid))
             menu.addAction("添加目录", lambda: self._add_directory_to(pid))
         menu.exec_(self.tree.viewport().mapToGlobal(pos))
+
+    def _entry_path(self, item):
+        if item is None or item.parent() is None:
+            return ""
+        pid = item.parent().data(0, Qt.UserRole)
+        idx = item.data(0, Qt.UserRole)
+        if pid is None or idx is None:
+            return ""
+        col = getattr(self, "_collection", None)
+        if col:
+            pl = col.find(pid)
+            if pl and 0 <= idx < len(pl.entries):
+                return pl.entries[idx].path
+        return ""
 
     def _create_inline(self):
         item = QTreeWidgetItem(["新建列表"])

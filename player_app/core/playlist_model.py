@@ -44,6 +44,55 @@ class Playlist:
             p.entries = [Entry(e["path"], e.get("name")) for e in d.get("entries", [])]
         return p
 
+    def remove_invalid(self) -> int:
+        """Remove entries whose files don't exist or aren't media. Returns count removed."""
+        valid = [e for e in self.entries if os.path.isfile(e.path) and is_media_file(e.path)]
+        removed = len(self.entries) - len(valid)
+        self.entries = valid
+        return removed
+
+    def dedupe(self) -> int:
+        """Keep first occurrence of each path. Returns count removed."""
+        seen = set()
+        deduped = []
+        for e in self.entries:
+            norm = os.path.normcase(e.path)
+            if norm not in seen:
+                seen.add(norm)
+                deduped.append(e)
+        removed = len(self.entries) - len(deduped)
+        self.entries = deduped
+        return removed
+
+    def sort_by_name(self):
+        self.entries.sort(key=lambda e: e.display_name.lower())
+
+    def sort_by_mtime(self):
+        self.entries.sort(key=lambda e: os.path.getmtime(e.path) if os.path.isfile(e.path) else 0)
+
+    def sort_by_duration(self):
+        """Sort by media duration using ffprobe. Missing/unprobeable files go last."""
+        import subprocess
+        durations = {}
+        for e in self.entries:
+            if not os.path.isfile(e.path):
+                durations[e.path] = -1
+                continue
+            try:
+                r = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", e.path],
+                    capture_output=True, text=True, timeout=10,
+                )
+                durations[e.path] = float(r.stdout.strip()) if r.stdout.strip() else 0
+            except Exception:
+                durations[e.path] = -1
+        self.entries.sort(key=lambda e: (durations.get(e.path, -1) < 0, durations.get(e.path, 0)))
+
+    def shuffle(self):
+        import random
+        random.shuffle(self.entries)
+
 
 class PlaylistCollection:
     def __init__(self):

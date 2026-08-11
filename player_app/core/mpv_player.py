@@ -15,6 +15,7 @@ class MpvSignals(QObject):
     file_loaded = pyqtSignal(str)
     eof_reached = pyqtSignal()
     paused_changed = pyqtSignal(bool)
+    playback_error = pyqtSignal(str)
 
 
 class MpvPlayer:
@@ -57,8 +58,12 @@ class MpvPlayer:
     def _on_event(self, event):
         try:
             d = event.as_dict(decoder=lambda b: b.decode("utf-8", "replace"))
-            if d.get("event") == "file-loaded":
+            event_name = d.get("event", "")
+            if event_name == "file-loaded":
                 self.signals.file_loaded.emit(self._player.path or "")
+            elif event_name == "end-file":
+                if d.get("reason", 0) == 2:  # error
+                    self.signals.playback_error.emit(self._player.path or "")
         except Exception:
             pass
 
@@ -108,6 +113,39 @@ class MpvPlayer:
     def is_muted(self) -> bool:
         return self._muted
 
+    _BASE_AF = "scaletempo2=max-speed=32.0"
+
+    def set_volume_normalization(self, on: bool):
+        if on:
+            self._player.af = self._BASE_AF + ",lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]"
+        else:
+            self._player.af = self._BASE_AF
+
+    # -- subtitles ------------------------------------------------------------
+    def set_sub_visibility(self, on: bool):
+        self._player.command("set", "sub-visibility", "yes" if on else "no")
+
+    def apply_subtitle_style(self, style: int):
+        if style == 2:
+            self._player.command("set", "sub-ass-override", "force")
+            self._player.command("set", "sub-color", "#FFFFFF")
+            self._player.command("set", "sub-back-color", "#DE18191C")
+            self._player.command("set", "sub-border-size", "0")
+            self._player.command("set", "sub-shadow-offset", "0")
+            self._player.command("set", "sub-blur", "1")
+        else:
+            self._player.command("set", "sub-ass-override", "force")
+            self._player.command("set", "sub-color", "#FFFFFF")
+            self._player.command("set", "sub-border-color", "#000000")
+            self._player.command("set", "sub-border-size", "3")
+            self._player.command("set", "sub-shadow-offset", "0")
+            self._player.command("set", "sub-back-color", "0.0")
+
+    def set_sub_pos(self, pos: int):
+        """Set subtitle vertical position, 0=top 100=bottom."""
+        self._player.command("set", "sub-pos", str(int(max(0, min(100, pos)))))
+
+    # -- position / duration --------------------------------------------------
     def get_position(self) -> float:
         v = self._player.time_pos
         return float(v) if v is not None else 0.0

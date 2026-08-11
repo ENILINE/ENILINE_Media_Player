@@ -69,6 +69,11 @@ def main():
         arg = arg.strip()
         if arg and os.path.exists(arg):
             startup_paths.append(os.path.abspath(arg))
+
+    from player_app.core.ipc import try_send_to_existing
+    if startup_paths and try_send_to_existing(startup_paths):
+        sys.exit(0)
+
     win = MainWindow(startup_paths=startup_paths)
     if not icon.isNull():
         win.setWindowIcon(icon)
