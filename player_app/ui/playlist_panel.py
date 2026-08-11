@@ -182,7 +182,7 @@ class PlaylistPanel(QWidget):
 
     TEMP_ROLE = Qt.UserRole + 1
 
-    def refresh(self, collection, current_pid, current_index):
+    def refresh(self, collection, current_pid, current_index, playing_pid=None):
         self._updating = True
         self.tree.blockSignals(True)
         try:
@@ -197,7 +197,12 @@ class PlaylistPanel(QWidget):
                 pl_item.setToolTip(0, pl.name)
                 self.tree.addTopLevelItem(pl_item)
                 for idx, e in enumerate(pl.entries):
-                    en_item = QTreeWidgetItem([e.display_name])
+                    label = e.display_name
+                    if playing_pid and pl.id == playing_pid and idx == current_index:
+                        label = "▶ " + label
+                    else:
+                        label = "  " + label
+                    en_item = QTreeWidgetItem([label])
                     en_item.setData(0, Qt.UserRole, idx)
                     en_item.setFlags(en_item.flags() | Qt.ItemIsEditable)
                     en_item.setToolTip(0, e.path)

@@ -13,7 +13,7 @@ class VideoSurface(QWidget):
         self.setAttribute(Qt.WA_NativeWindow, True)
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setMinimumSize(160, 90)
+        self.setMinimumSize(120, 80)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
 

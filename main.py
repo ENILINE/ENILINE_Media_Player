@@ -28,15 +28,41 @@ def _bootstrap_mpv():
 
 _bootstrap_mpv()
 
+from PyQt5.QtCore import QByteArray, Qt
+from PyQt5.QtGui import QIcon, QPainter, QPixmap
+from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
 from player_app.ui.main_window import MainWindow  # noqa: E402
 from player_app.ui.theme import QSS  # noqa: E402
 
 
+def _load_app_icon() -> QIcon:
+    if getattr(sys, "frozen", False):
+        base = sys._MEIPASS if hasattr(sys, "_MEIPASS") else os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(base, "icon.svg")
+    if os.path.exists(icon_path):
+        with open(icon_path, "r", encoding="utf-8") as f:
+            svg_data = f.read()
+        renderer = QSvgRenderer(QByteArray(svg_data.encode("utf-8")))
+        pm = QPixmap(256, 256)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        renderer.render(painter)
+        painter.end()
+        return QIcon(pm)
+    return QIcon()
+
+
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("VideoPlayer")
+    app.setApplicationName("ENILINE Media Player")
+    app.setOrganizationName("ENILINE")
+    icon = _load_app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     app.setStyleSheet(QSS)
     startup_paths = []
     for arg in sys.argv[1:]:
@@ -44,6 +70,8 @@ def main():
         if arg and os.path.exists(arg):
             startup_paths.append(os.path.abspath(arg))
     win = MainWindow(startup_paths=startup_paths)
+    if not icon.isNull():
+        win.setWindowIcon(icon)
     win.show()
     sys.exit(app.exec_())
 

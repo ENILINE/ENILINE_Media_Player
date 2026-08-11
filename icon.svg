@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="200" height="200">
+    <defs>
+        <linearGradient id="playGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#00C6FF" />
+            <stop offset="100%" stop-color="#0072FF" />
+        </linearGradient>
+    </defs>
+    <circle cx="50" cy="50" r="46" fill="url(#playGradient)" filter="url(#shadow)" />
+    <g id="play-button-core" filter="url(#shadow)" transform="translate(2, 0)">
+        <path d="M 38 32 L 38 68 L 65 50 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round" />
+    </g>
+</svg>

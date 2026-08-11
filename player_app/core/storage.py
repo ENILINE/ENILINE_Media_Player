@@ -13,7 +13,7 @@ from PyQt5.QtCore import QStandardPaths
 def _data_dir() -> str:
     base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
     if not base:
-        base = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "VideoPlayer")
+        base = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "ENILINE_Media_Player")
     os.makedirs(base, exist_ok=True)
     return base
 

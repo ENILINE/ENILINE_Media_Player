@@ -47,7 +47,7 @@ TURBO_HOLD_MS = 250
 class MainWindow(QMainWindow):
     def __init__(self, startup_paths=None):
         super().__init__()
-        self.setWindowTitle("本地视频播放器")
+        self.setWindowTitle("ENILINE Media Player")
         self.resize(1100, 700)
 
         self.storage = Storage()
@@ -78,6 +78,8 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._load_settings()
+        if self._pending_splitter_sizes:
+            self.splitter.setSizes(self._pending_splitter_sizes)
         self._wire_controls()
         self._refresh_panel()
 
@@ -90,11 +92,11 @@ class MainWindow(QMainWindow):
         self._resume_timer.start()
 
     def _ensure_builtin_lists(self):
-        # Remove stale temp lists from saved data; always recreate fresh.
+        import os as _os
         self.collection.playlists = [p for p in self.collection.playlists if not p.is_temp]
         temp = Playlist("临时列表", is_temp=True)
         self.collection.playlists.insert(0, temp)
-        if not any(p.name == "默认列表" and not p.is_temp for p in self.collection.playlists):
+        if not _os.path.exists(self.storage.playlists_path):
             default = Playlist("默认列表")
             self.collection.playlists.insert(1, default)
 
@@ -228,9 +230,26 @@ class MainWindow(QMainWindow):
         self._last_index = st.get("last_index", -1)
         if self._last_pid and self.collection.find(self._last_pid):
             self.current_pid = self._last_pid
+        geo_hex = st.get("geometry")
+        if geo_hex:
+            try:
+                from PyQt5.QtCore import QByteArray
+                self.restoreGeometry(QByteArray(bytes.fromhex(geo_hex)))
+            except Exception:
+                pass
+        sizes = st.get("splitter_sizes")
+        if sizes and isinstance(sizes, list) and len(sizes) == 2:
+            self._pending_splitter_sizes = sizes
+        else:
+            self._pending_splitter_sizes = None
+
+    def _update_settings(self, updates: dict):
+        data = self.storage.load_settings()
+        data.update(updates)
+        self.storage.save_settings(data)
 
     def _save_settings(self):
-        self.storage.save_settings({
+        self._update_settings({
             "mode": self.playback_mode,
             "volume": self.player.get_volume() if self.player else 60,
             "last_pid": self.current_pid,
@@ -246,6 +265,7 @@ class MainWindow(QMainWindow):
 
     def _on_file_loaded(self, path):
         self._current_path = path
+        self.controls.set_playing(True)
         pos = self.storage.load_resume().get(path)
         if pos:
             QTimer.singleShot(300, lambda: self._apply_resume(path, pos))
@@ -369,6 +389,7 @@ class MainWindow(QMainWindow):
         self.current_pid = pid
         self._at_eof = False
         self.player.load(pl.entries[index].path)
+        self.controls.set_playing(True)
         self._refresh_panel()
 
     def _play_prev(self):
@@ -411,7 +432,7 @@ class MainWindow(QMainWindow):
     def _do_refresh_panel(self):
         self._refresh_queued = False
         hi = self.playing_index if self.playing_pid == self.current_pid else None
-        self.panel.refresh(self.collection, self.current_pid, hi)
+        self.panel.refresh(self.collection, self.current_pid, hi, self.playing_pid)
 
     # -- playlist operations (undoable) ----------------------------------------
     def _run(self, cmd):
@@ -680,6 +701,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.player:
             self._save_resume()
+            self._update_settings({
+                "geometry": bytes(self.saveGeometry()).hex(),
+                "splitter_sizes": self.splitter.sizes(),
+            })
             self._save_settings()
             self.player.shutdown()
         super().closeEvent(event)
