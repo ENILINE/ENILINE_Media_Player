@@ -87,7 +87,13 @@ class MainWindow(QMainWindow):
         self._subtitle_pos = 100
         self._volume_normalization = False
         self._hotkey_settings = {"play": "", "prev": "", "next": ""}
-        self._error_popup_open = False
+        self._error_queue = []          # paths queued for error popup
+        self._error_processing = False  # prevent cascading error handlers
+        self._error_popup_open = False  # prevent duplicate popups
+
+        self._load_timeout_timer = QTimer(self)
+        self._load_timeout_timer.setSingleShot(True)
+        self._load_timeout_timer.timeout.connect(self._on_load_timeout)
 
         app = QApplication.instance()
         self._hotkey_mgr = GlobalHotkeyManager(self)
@@ -143,7 +149,6 @@ class MainWindow(QMainWindow):
         self.video_surface.settings_requested.connect(self._open_settings)
         self.video_surface.about_requested.connect(self._show_about)
         self.video_surface.browse_file_requested.connect(self._browse_file)
-        self.video_surface.file_properties_requested.connect(self._file_properties)
         self.video_surface.subtitle_pos_changed.connect(self._on_sub_pos_dragged)
         self.controls = Controls()
 
@@ -161,7 +166,6 @@ class MainWindow(QMainWindow):
         self.panel.copy_list_requested.connect(self.copy_playlist)
         self.panel.rename_entry_requested.connect(self.rename_entry)
         self.panel.browse_file_requested.connect(self._browse_file)
-        self.panel.file_properties_requested.connect(self._file_properties)
         self.panel.clean_invalid_requested.connect(self._clean_invalid)
         self.panel.dedupe_requested.connect(self._dedupe)
         self.panel.sort_by_name_requested.connect(self._sort_by_name)
@@ -331,8 +335,11 @@ class MainWindow(QMainWindow):
             self._save_resume()
 
     def _on_file_loaded(self, path):
+        self._load_timeout_timer.stop()
         self._current_path = path
         self._error_count = 0
+        self._error_processing = False
+        self._error_queue.clear()
         self.video_surface.set_current_path(path)
         self.controls.set_playing(True)
         pos = self.storage.load_resume().get(path)
@@ -457,7 +464,14 @@ class MainWindow(QMainWindow):
         self.playing_index = index
         self.current_pid = pid
         self._at_eof = False
-        self.player.load(pl.entries[index].path)
+        path = pl.entries[index].path
+        import os as _os
+        if not _os.path.isfile(path):
+            self._on_playback_error(path)
+            return
+        self._loading_path = path
+        self.player.load(path)
+        self._load_timeout_timer.start(4000)  # 4s timeout for invalid formats
         self.controls.set_playing(True)
         self._refresh_panel()
 
@@ -825,19 +839,6 @@ class MainWindow(QMainWindow):
         from .video_surface import open_file_location
         open_file_location(path)
 
-    def _file_properties(self, path):
-        import os as _os
-        if not path or not _os.path.isfile(path):
-            ret = QMessageBox.question(
-                self, "文件不存在",
-                f"找不到文件:\n{path}\n\n是否从列表中删除？",
-            )
-            if ret == QMessageBox.Yes:
-                self._remove_by_path(path)
-            return
-        from .video_surface import show_file_properties
-        show_file_properties(path)
-
     def _remove_by_path(self, path):
         """Remove an entry by path from whatever playlist contains it."""
         import os as _os
@@ -851,19 +852,49 @@ class MainWindow(QMainWindow):
                     return
 
     def _on_playback_error(self, path):
+        self.controls.set_playing(False)
+        self._load_timeout_timer.stop()
         self._error_count += 1
+        self._error_queue.append(path)
+        if not self._error_processing:
+            self._error_processing = True
+            QTimer.singleShot(0, self._process_errors)
+
+    def _on_load_timeout(self):
+        """mpv didn't emit file-loaded within 4s — treat as playback error."""
+        path = getattr(self, "_loading_path", "")
+        if path:
+            self._on_playback_error(path)
+
+    def _process_errors(self):
         pl = self.collection.find(self.playing_pid)
         total = len(pl.entries) if pl else 0
-        # Skip to next first, then show popup
-        if total > 0:
-            self._play_next()
-        if total > 0 and self._error_count >= total:
+
+        # Skip through consecutive invalid files.
+        # _play_index triggers _on_playback_error for each bad file; stop
+        # when a load succeeds (no new error added) or the list is exhausted.
+        while self._error_count < total:
+            nxt = self._next_index_internal()
+            if nxt is None:
+                break
+            err_before = self._error_count
+            self._play_index(self.playing_pid, nxt)
+            if self._error_count == err_before:
+                break  # file accepted, wait for mpv async result
+
+        if self._error_count >= total:
             self._error_count = 0
+            self._error_queue.clear()
+            self._error_processing = False
             if self.player:
                 self.player.pause()
             QMessageBox.warning(self, "播放失败", "当前列表中所有文件均无法播放。")
             return
-        if not self._error_popup_open:
+
+        # Show popup for the first error (the one user clicked on)
+        if self._error_queue and not self._error_popup_open:
+            path = self._error_queue[0]
+            self._error_queue.clear()
             self._error_popup_open = True
             ret = QMessageBox.question(
                 self, "播放失败",
@@ -872,6 +903,18 @@ class MainWindow(QMainWindow):
             if ret == QMessageBox.Yes:
                 self._remove_by_path(path)
             self._error_popup_open = False
+
+        self._error_processing = False
+
+    def _next_index_internal(self):
+        """Return the next index to play (1 step forward). Doesn't play it."""
+        pl = self.collection.find(self.playing_pid)
+        if pl is None or not pl.entries:
+            return None
+        n = len(pl.entries)
+        cur = self.playing_index if self.playing_pid == pl.id else -1
+        nxt = (cur + 1) % n
+        return nxt
 
     def _clean_invalid(self, pid):
         pl = self.collection.find(pid)
@@ -980,8 +1023,10 @@ class MainWindow(QMainWindow):
 
     # -- hotkeys --------------------------------------------------------------
     def _apply_hotkeys(self):
+        hwnd = int(self.winId())
+        print(f"[hotkey] _apply_hotkeys: hwnd=0x{hwnd:X} settings={self._hotkey_settings}")
         old = dict(self._hotkey_settings)
-        result = self._hotkey_mgr.apply(int(self.winId()), self._hotkey_settings)
+        result = self._hotkey_mgr.apply(hwnd, self._hotkey_settings)
         self._hotkey_settings = result
         self._update_settings({
             "hotkey_play": result.get("play", ""),
@@ -999,11 +1044,12 @@ class MainWindow(QMainWindow):
 
     # -- subtitles ------------------------------------------------------------
     def _apply_subtitle_settings(self):
+        self.video_surface.set_subtitle_enabled(self._subtitle_enabled)
+        self.video_surface.set_sub_drag_start_pos(self._subtitle_pos)
         if self.player:
             self.player.set_sub_visibility(self._subtitle_enabled)
             self.player.apply_subtitle_style(self._subtitle_style)
             self.player.set_sub_pos(self._subtitle_pos)
-            self.video_surface.set_sub_drag_start_pos(self._subtitle_pos)
 
     def _on_sub_pos_dragged(self, pos):
         self._subtitle_pos = pos

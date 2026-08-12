@@ -4,6 +4,8 @@ python-mpv runs its own event thread; all mpv callbacks are marshalled to the
 UI thread through MpvSignals (queued Qt signals), so UI code never touches mpv
 objects from the wrong thread.
 """
+import traceback
+
 import mpv  # requires libmpv on PATH; main.py sets that up before import
 
 from PyQt5.QtCore import QObject, pyqtSignal
@@ -59,13 +61,19 @@ class MpvPlayer:
         try:
             d = event.as_dict(decoder=lambda b: b.decode("utf-8", "replace"))
             event_name = d.get("event", "")
+            # Log all file-related events for debugging playback failures
+            if event_name in ("start-file", "file-loaded", "end-file"):
+                reason = d.get("reason", "N/A") if event_name == "end-file" else ""
+                print(f"[mpv] {event_name} path={self._player.path} reason={reason}")
             if event_name == "file-loaded":
                 self.signals.file_loaded.emit(self._player.path or "")
             elif event_name == "end-file":
-                if d.get("reason", 0) == 2:  # error
+                reason = d.get("reason", 0)
+                print(f"[mpv] end-file reason={reason} error={d.get('error','N/A')}")
+                if reason == 2:  # error
                     self.signals.playback_error.emit(self._player.path or "")
         except Exception:
-            pass
+            traceback.print_exc()
 
     # -- public API --------------------------------------------------------
     def load(self, path: str, start: bool = True):
@@ -127,15 +135,23 @@ class MpvPlayer:
 
     def apply_subtitle_style(self, style: int):
         if style == 2:
+            # White text on dark semi-transparent background box, no borders
+            # BorderStyle=3: opaque box using OutlineColour (sub-border-color)
+            # BorderStyle=4: background box using BackColour (sub-back-color)
+            # Set both for cross-version compatibility
             self._player.command("set", "sub-ass-override", "force")
+            self._player.command("set", "sub-ass-force-style", "BorderStyle=3")
+            self._player.command("set", "sub-border-style", "background-box")
             self._player.command("set", "sub-color", "#FFFFFF")
+            self._player.command("set", "sub-border-color", "#DE18191C")
             self._player.command("set", "sub-back-color", "#DE18191C")
-            self._player.command("set", "sub-border-color", "#000000")
-            self._player.command("set", "sub-border-size", "2")
+            self._player.command("set", "sub-border-size", "0")
             self._player.command("set", "sub-shadow-offset", "0")
             self._player.command("set", "sub-blur", "0")
         else:
             self._player.command("set", "sub-ass-override", "force")
+            self._player.command("set", "sub-ass-force-style", "")
+            self._player.command("set", "sub-border-style", "outline-and-shadow")
             self._player.command("set", "sub-color", "#FFFFFF")
             self._player.command("set", "sub-border-color", "#000000")
             self._player.command("set", "sub-border-size", "3")

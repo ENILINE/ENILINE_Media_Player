@@ -1,9 +1,8 @@
-import ctypes
 import os
 import subprocess
 
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QCursor, QPainter
+from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import QMenu, QWidget
 
 
@@ -14,7 +13,6 @@ class VideoSurface(QWidget):
     settings_requested = pyqtSignal()
     about_requested = pyqtSignal()
     browse_file_requested = pyqtSignal(str)
-    file_properties_requested = pyqtSignal(str)
     subtitle_pos_changed = pyqtSignal(int)
 
     def __init__(self, parent=None):
@@ -29,24 +27,33 @@ class VideoSurface(QWidget):
         self._sub_dragging = False
         self._sub_drag_start_y = 0
         self._sub_drag_start_pos = 100
+        self._subtitle_enabled = True
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
 
     def set_current_path(self, path: str):
         self._current_path = path
 
+    def set_subtitle_enabled(self, enabled: bool):
+        self._subtitle_enabled = enabled
+
     def _in_subtitle_zone(self, y: int) -> bool:
-        """Bottom 30% of the widget is the subtitle drag zone."""
+        """Zone follows the current subtitle vertical position."""
+        if not self._subtitle_enabled or not self._current_path:
+            return False
         h = self.height()
-        return h > 0 and y > h * 0.7
+        if h <= 0:
+            return False
+        sub_y = int(h * self._sub_drag_start_pos / 100.0)
+        margin = int(h * 0.12)
+        return abs(y - sub_y) < margin
 
     def mouseMoveEvent(self, event):
         if self._sub_dragging:
-            dy = self._sub_drag_start_y - event.y()
-            # Map pixel delta to sub-pos (0=top, 100=bottom)
+            # Direct mapping: subtitle y = mouse y
             h = max(self.height(), 1)
-            delta_pos = int(dy / h * 100)
-            new_pos = max(0, min(100, self._sub_drag_start_pos + delta_pos))
+            new_pos = int(event.y() / h * 100)
+            new_pos = max(0, min(100, new_pos))
             self.subtitle_pos_changed.emit(new_pos)
         elif self._in_subtitle_zone(event.y()):
             self.setCursor(Qt.SizeAllCursor)
@@ -56,8 +63,6 @@ class VideoSurface(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self._in_subtitle_zone(event.y()):
             self._sub_dragging = True
-            self._sub_drag_start_y = event.y()
-            self._sub_drag_start_pos = 100  # Will be updated from outside
             self.setCursor(Qt.SizeAllCursor)
         else:
             super().mousePressEvent(event)
@@ -84,7 +89,6 @@ class VideoSurface(QWidget):
         if has_file:
             menu.addSeparator()
             menu.addAction("浏览文件", lambda: self.browse_file_requested.emit(self._current_path))
-            menu.addAction("属性", lambda: self.file_properties_requested.emit(self._current_path))
         menu.exec_(self.mapToGlobal(pos))
 
     def paintEvent(self, event):
@@ -119,17 +123,3 @@ def open_file_location(path: str):
     except Exception:
         if os.path.exists(path):
             os.startfile(os.path.dirname(path))
-
-
-def show_file_properties(path: str):
-    """Open the Windows file properties dialog."""
-    try:
-        shell32 = ctypes.windll.shell32
-        shell32.ShellExecuteW.argtypes = [
-            ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
-            ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int,
-        ]
-        shell32.ShellExecuteW.restype = ctypes.c_void_p
-        shell32.ShellExecuteW(0, "properties", os.path.normpath(path), None, None, 1)
-    except Exception:
-        pass

@@ -8,12 +8,19 @@ MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
+MOD_NOREPEAT = 0x4000
 WM_HOTKEY = 0x0312
 
 MOD_NAMES = [(MOD_CONTROL, "Ctrl"), (MOD_ALT, "Alt"), (MOD_SHIFT, "Shift"), (MOD_WIN, "Win")]
 
-# Direct VK code map (hex values per Win32 API).
-# No reliance on ctypes.wintypes for availability of every constant.
+# Set up proper argtypes/restype for 64-bit Windows — HWND is pointer-sized,
+# and without this ctypes defaults to 32-bit int, truncating the handle.
+_user32 = ctypes.windll.user32
+_user32.RegisterHotKey.argtypes = [wintypes.HWND, wintypes.INT, wintypes.UINT, wintypes.UINT]
+_user32.RegisterHotKey.restype = wintypes.BOOL
+_user32.UnregisterHotKey.argtypes = [wintypes.HWND, wintypes.INT]
+_user32.UnregisterHotKey.restype = wintypes.BOOL
+
 _VK_MAP: dict[str, int] = {
     # Letters
     "A": 0x41, "B": 0x42, "C": 0x43, "D": 0x44, "E": 0x45, "F": 0x46,
@@ -82,15 +89,24 @@ class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
         return "+".join(parts)
 
     def register(self, hwnd: int, hotkey_id: int, s: str) -> bool:
-        """Register a hotkey string. Returns True on success."""
+        """Register a hotkey string. Returns True on success.
+
+        Empty string = disabled (returns True).
+        Single key without modifiers = rejected (returns False).
+        """
         mods, vk = self.parse(s)
         if vk == 0:
             return True  # empty = disabled, not a failure
-        ok = ctypes.windll.user32.RegisterHotKey(hwnd, hotkey_id, mods, vk)
+        if mods == 0:
+            print(f"[hotkey] REJECTED bare key: '{s}' — requires at least one modifier")
+            return False
+        ok = _user32.RegisterHotKey(hwnd, hotkey_id, mods | MOD_NOREPEAT, vk)
+        err = ctypes.get_last_error() if not ok else 0
+        print(f"[hotkey] RegisterHotKey(hwnd=0x{hwnd:X}, id={hotkey_id}, mods=0x{mods|MOD_NOREPEAT:04X}, vk=0x{vk:02X}) -> {bool(ok)} err={err}")
         return bool(ok)
 
     def unregister(self, hwnd: int, hotkey_id: int):
-        ctypes.windll.user32.UnregisterHotKey(hwnd, hotkey_id)
+        _user32.UnregisterHotKey(hwnd, hotkey_id)
 
     def unregister_all(self, hwnd: int):
         for hid in list(self._hotkeys):
@@ -117,11 +133,15 @@ class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
         return result
 
     def nativeEventFilter(self, event_type, message):
-        msg = ctypes.wintypes.MSG.from_address(int(message))
+        msg = wintypes.MSG.from_address(int(message))
         if msg.message == WM_HOTKEY:
             hid = msg.wParam
+            print(f"[hotkey] WM_HOTKEY received: id={hid}")
             entry = self._hotkeys.get(hid)
             if entry:
+                print(f"[hotkey] emitting signal for id={hid}")
                 entry[0].emit()
+            else:
+                print(f"[hotkey] unknown id={hid}, registered={list(self._hotkeys.keys())}")
             return True, 0
         return False, 0

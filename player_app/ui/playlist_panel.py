@@ -129,7 +129,6 @@ class PlaylistPanel(QWidget):
     copy_list_requested = pyqtSignal(str)
     rename_entry_requested = pyqtSignal(str, int, str)
     browse_file_requested = pyqtSignal(str)
-    file_properties_requested = pyqtSignal(str)
     clean_invalid_requested = pyqtSignal(str)
     dedupe_requested = pyqtSignal(str)
     sort_by_name_requested = pyqtSignal(str)
@@ -392,7 +391,6 @@ class PlaylistPanel(QWidget):
                 menu.addSeparator()
                 path = self._entry_path(item)
                 menu.addAction("浏览文件", lambda: self.browse_file_requested.emit(path))
-                menu.addAction("文件属性", lambda: self.file_properties_requested.emit(path))
         else:
             pid = self.current_pid
             menu.addAction("添加文件", lambda: self._add_files_to(pid))
@@ -458,7 +456,15 @@ class PlaylistPanel(QWidget):
                     self.tree.takeTopLevelItem(idx)
             self._pending = None
         elif hint == QAbstractItemDelegate.NoHint:
-            # committed; itemChanged normally handled it, but clear if unchanged.
+            # _on_item_changed may not fire if text was unchanged; handle create here
+            if p["kind"] == "create":
+                text = p["item"].text(0).strip()
+                if text:
+                    self.create_requested.emit(text)
+                else:
+                    idx = self.tree.indexOfTopLevelItem(p["item"])
+                    if idx >= 0:
+                        self.tree.takeTopLevelItem(idx)
             self._pending = None
 
     # -- add files / directory --------------------------------------------------

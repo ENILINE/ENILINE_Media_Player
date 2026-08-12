@@ -54,4 +54,4 @@ pyinstaller player.spec --noconfirm
 | Ctrl+X / Ctrl+C / Ctrl+V | 剪切 / 复制 / 粘贴 |
 | F2 | 重命名 |
 
-播放列表与进度数据保存在 `%APPDATA%/VideoPlayer/`.
+播放列表与进度数据保存在 `%APPDATA%/ENILINE/ENILINE Media Player/`.
