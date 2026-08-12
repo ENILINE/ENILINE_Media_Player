@@ -130,9 +130,10 @@ class MpvPlayer:
             self._player.command("set", "sub-ass-override", "force")
             self._player.command("set", "sub-color", "#FFFFFF")
             self._player.command("set", "sub-back-color", "#DE18191C")
-            self._player.command("set", "sub-border-size", "0")
+            self._player.command("set", "sub-border-color", "#000000")
+            self._player.command("set", "sub-border-size", "2")
             self._player.command("set", "sub-shadow-offset", "0")
-            self._player.command("set", "sub-blur", "1")
+            self._player.command("set", "sub-blur", "0")
         else:
             self._player.command("set", "sub-ass-override", "force")
             self._player.command("set", "sub-color", "#FFFFFF")

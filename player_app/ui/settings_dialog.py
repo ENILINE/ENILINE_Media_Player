@@ -3,11 +3,11 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QGroupBox,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QVBoxLayout,
 )
 
@@ -30,6 +30,15 @@ class HotkeyCaptureWidget(QLineEdit):
 
     def keyPressEvent(self, event):
         key = event.key()
+        # Backspace / Escape alone: clear the hotkey
+        if key in (Qt.Key_Backspace, Qt.Key_Escape):
+            mods = int(event.modifiers())
+            if mods == 0 or mods == Qt.KeypadModifier:
+                self.setText("")
+                self.setStyleSheet("")
+                self.captured.emit()
+                return
+
         if key in (Qt.Key_Control, Qt.Key_Alt, Qt.Key_Shift, Qt.Key_Meta):
             return
         mods = int(event.modifiers())
@@ -71,13 +80,10 @@ class HotkeyCaptureWidget(QLineEdit):
             }.get(key, "")
         if name:
             parts.append(name)
-            self.setText("+".join(parts))
-            self.setStyleSheet("")
-            self.captured.emit()
-        else:
-            self.setText("")
-            self.setStyleSheet("")
-            self.captured.emit()
+        display = "+".join(parts)
+        self.setText(display)
+        self.setStyleSheet("")
+        self.captured.emit()
 
     def focusOutEvent(self, event):
         if self.text() == "按下快捷键...":
@@ -90,6 +96,7 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.resize(420, 380)
         self._values = dict(settings)
 
@@ -146,12 +153,6 @@ class SettingsDialog(QDialog):
         fl_sys.addRow("关闭时最小化到任务栏", self._cb_tray)
         layout.addWidget(gb_sys)
 
-        # Buttons
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(self._save)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-
     def _save(self):
         self._values["remember_position"] = self._cb_remember.isChecked()
         self._values["subtitle_enabled"] = self._cb_sub_enabled.isChecked()
@@ -161,7 +162,32 @@ class SettingsDialog(QDialog):
         self._values["hotkey_play"] = self._hk_play.text()
         self._values["hotkey_prev"] = self._hk_prev.text()
         self._values["hotkey_next"] = self._hk_next.text()
+
+    def _check_conflicts(self) -> list[str]:
+        """Check for duplicate hotkey assignments. Returns list of conflict descriptions."""
+        keys = [
+            ("播放/暂停", self._hk_play.text()),
+            ("上一首", self._hk_prev.text()),
+            ("下一首", self._hk_next.text()),
+        ]
+        warnings = []
+        seen = {}
+        for label, text in keys:
+            if not text:
+                continue
+            if text in seen:
+                warnings.append(f"「{seen[text]}」和「{label}」快捷键冲突: {text}")
+            else:
+                seen[text] = label
+        return warnings
+
+    def closeEvent(self, event):
+        conflicts = self._check_conflicts()
+        if conflicts:
+            QMessageBox.warning(self, "快捷键冲突", "\n".join(conflicts))
+        self._save()
         self.accept()
+        super().closeEvent(event)
 
     def values(self) -> dict:
         return dict(self._values)

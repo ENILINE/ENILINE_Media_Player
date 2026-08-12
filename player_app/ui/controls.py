@@ -153,7 +153,7 @@ class Controls(QWidget):
         row2.addSpacing(8)
 
         self.mode_btn = QPushButton("列表循环")
-        self.mode_btn.setFixedWidth(72)
+        self.mode_btn.setMinimumWidth(88)
         self.mode_btn.setFocusPolicy(Qt.NoFocus)
         self.mode_btn.clicked.connect(self.mode_cycle_requested.emit)
         row2.addWidget(self.mode_btn)

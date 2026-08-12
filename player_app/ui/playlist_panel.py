@@ -431,8 +431,12 @@ class PlaylistPanel(QWidget):
         text = item.text(0).strip()
         kind = p["kind"]
         if kind == "create":
-            if text and text != p["old"]:
+            if text:
                 self.create_requested.emit(text)
+            else:
+                idx = self.tree.indexOfTopLevelItem(item)
+                if idx >= 0:
+                    self.tree.takeTopLevelItem(idx)
             self._pending = None
         elif kind == "rename_playlist":
             if text and text != p["old"]:

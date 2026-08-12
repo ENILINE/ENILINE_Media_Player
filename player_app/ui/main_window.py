@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self._subtitle_pos = 100
         self._volume_normalization = False
         self._hotkey_settings = {"play": "", "prev": "", "next": ""}
+        self._error_popup_open = False
 
         app = QApplication.instance()
         self._hotkey_mgr = GlobalHotkeyManager(self)
@@ -121,6 +122,11 @@ class MainWindow(QMainWindow):
         self._resume_timer.timeout.connect(self._save_resume)
         self._resume_timer.start()
 
+        self._sub_pos_save_timer = QTimer(self)
+        self._sub_pos_save_timer.setSingleShot(True)
+        self._sub_pos_save_timer.setInterval(500)
+        self._sub_pos_save_timer.timeout.connect(self._save_sub_pos)
+
     def _ensure_builtin_lists(self):
         import os as _os
         self.collection.playlists = [p for p in self.collection.playlists if not p.is_temp]
@@ -138,6 +144,7 @@ class MainWindow(QMainWindow):
         self.video_surface.about_requested.connect(self._show_about)
         self.video_surface.browse_file_requested.connect(self._browse_file)
         self.video_surface.file_properties_requested.connect(self._file_properties)
+        self.video_surface.subtitle_pos_changed.connect(self._on_sub_pos_dragged)
         self.controls = Controls()
 
         self.panel = PlaylistPanel()
@@ -847,33 +854,38 @@ class MainWindow(QMainWindow):
         self._error_count += 1
         pl = self.collection.find(self.playing_pid)
         total = len(pl.entries) if pl else 0
-        if total > 0 and self._error_count > total:
+        # Skip to next first, then show popup
+        if total > 0:
+            self._play_next()
+        if total > 0 and self._error_count >= total:
             self._error_count = 0
             if self.player:
                 self.player.pause()
             QMessageBox.warning(self, "播放失败", "当前列表中所有文件均无法播放。")
             return
-        ret = QMessageBox.question(
-            self, "播放失败",
-            f"无法播放:\n{path}\n\n是否从列表中删除并跳过？",
-        )
-        if ret == QMessageBox.Yes:
-            self._remove_by_path(path)
-        self._play_next()
+        if not self._error_popup_open:
+            self._error_popup_open = True
+            ret = QMessageBox.question(
+                self, "播放失败",
+                f"无法播放:\n{path}\n\n是否从列表中删除？",
+            )
+            if ret == QMessageBox.Yes:
+                self._remove_by_path(path)
+            self._error_popup_open = False
 
     def _clean_invalid(self, pid):
         pl = self.collection.find(pid)
         if pl is None:
             return
-        removed = pl.remove_invalid()
-        self._playlist_op_done(pid, f"已清空 {removed} 个无效文件。")
+        pl.remove_invalid()
+        self._playlist_op_done(pid)
 
     def _dedupe(self, pid):
         pl = self.collection.find(pid)
         if pl is None:
             return
-        removed = pl.dedupe()
-        self._playlist_op_done(pid, f"已去重 {removed} 个条目。")
+        pl.dedupe()
+        self._playlist_op_done(pid)
 
     def _sort_by_name(self, pid):
         pl = self.collection.find(pid)
@@ -908,6 +920,18 @@ class MainWindow(QMainWindow):
         self._playlist_op_done(pid)
 
     def _playlist_op_done(self, pid, msg=None):
+        # Update playing_index if the playing entry moved
+        if self.playing_pid == pid and self.playing_index >= 0:
+            pl = self.collection.find(pid)
+            if pl and self._current_path:
+                import os as _os
+                norm = _os.path.normcase(self._current_path)
+                for i, e in enumerate(pl.entries):
+                    if _os.path.normcase(e.path) == norm:
+                        self.playing_index = i
+                        break
+                else:
+                    self.playing_index = -1
         self.storage.save_playlists(self.collection)
         self._refresh_panel()
         self._save_settings()
@@ -956,6 +980,7 @@ class MainWindow(QMainWindow):
 
     # -- hotkeys --------------------------------------------------------------
     def _apply_hotkeys(self):
+        old = dict(self._hotkey_settings)
         result = self._hotkey_mgr.apply(int(self.winId()), self._hotkey_settings)
         self._hotkey_settings = result
         self._update_settings({
@@ -963,6 +988,14 @@ class MainWindow(QMainWindow):
             "hotkey_prev": result.get("prev", ""),
             "hotkey_next": result.get("next", ""),
         })
+        # Warn about any hotkeys that failed to register
+        failed = []
+        for key, label in [("play", "播放/暂停"), ("prev", "上一首"), ("next", "下一首")]:
+            if old.get(key) and not result.get(key):
+                failed.append(f"{label}: {old[key]}")
+        if failed:
+            QMessageBox.warning(self, "快捷键注册失败",
+                "以下快捷键可能被其他程序占用,已自动禁用:\n" + "\n".join(failed))
 
     # -- subtitles ------------------------------------------------------------
     def _apply_subtitle_settings(self):
@@ -970,6 +1003,17 @@ class MainWindow(QMainWindow):
             self.player.set_sub_visibility(self._subtitle_enabled)
             self.player.apply_subtitle_style(self._subtitle_style)
             self.player.set_sub_pos(self._subtitle_pos)
+            self.video_surface.set_sub_drag_start_pos(self._subtitle_pos)
+
+    def _on_sub_pos_dragged(self, pos):
+        self._subtitle_pos = pos
+        self.video_surface.set_sub_drag_start_pos(pos)
+        if self.player:
+            self.player.set_sub_pos(pos)
+        self._sub_pos_save_timer.start()
+
+    def _save_sub_pos(self):
+        self._update_settings({"subtitle_pos": self._subtitle_pos})
 
     # -- teardown ---------------------------------------------------------------
     def closeEvent(self, event):

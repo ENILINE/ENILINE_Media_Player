@@ -73,20 +73,30 @@ class Playlist:
     def sort_by_duration(self):
         """Sort by media duration using ffprobe. Missing/unprobeable files go last."""
         import subprocess
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         durations = {}
-        for e in self.entries:
-            if not os.path.isfile(e.path):
-                durations[e.path] = -1
-                continue
+
+        def _probe(path):
+            if not os.path.isfile(path):
+                return path, -1
             try:
                 r = subprocess.run(
                     ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-                     "-of", "default=noprint_wrappers=1:nokey=1", e.path],
-                    capture_output=True, text=True, timeout=10,
+                     "-of", "default=noprint_wrappers=1:nokey=1", path],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
                 )
-                durations[e.path] = float(r.stdout.strip()) if r.stdout.strip() else 0
+                return path, float(r.stdout.strip()) if r.stdout.strip() else 0
             except Exception:
-                durations[e.path] = -1
+                return path, -1
+
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = [ex.submit(_probe, e.path) for e in self.entries]
+            for future in as_completed(futures):
+                p, d = future.result()
+                durations[p] = d
+
         self.entries.sort(key=lambda e: (durations.get(e.path, -1) < 0, durations.get(e.path, 0)))
 
     def shuffle(self):
