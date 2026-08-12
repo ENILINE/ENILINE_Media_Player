@@ -65,11 +65,12 @@ class HotkeyCaptureWidget(QLineEdit):
             Qt.Key_ScrollLock: "ScrollLock", Qt.Key_Pause: "Pause",
             Qt.Key_Print: "Print", Qt.Key_Menu: "Menu",
         }
+        is_numpad = bool(mods & Qt.KeypadModifier)
         name = key_names.get(key)
         if name is None and Qt.Key_A <= key <= Qt.Key_Z:
             name = chr(key)
         elif name is None and Qt.Key_0 <= key <= Qt.Key_9:
-            name = chr(key)
+            name = ("Num" if is_numpad else "") + chr(key)
         elif name is None and Qt.Key_Semicolon <= key <= Qt.Key_QuoteLeft:
             name = {
                 Qt.Key_Semicolon: ";", Qt.Key_Equal: "=", Qt.Key_Comma: ",",
@@ -78,6 +79,11 @@ class HotkeyCaptureWidget(QLineEdit):
                 Qt.Key_BracketRight: "]", Qt.Key_Apostrophe: "'",
                 Qt.Key_QuoteLeft: "`",
             }.get(key, "")
+        if is_numpad and not name.startswith("Num"):
+            numpad_ops = {Qt.Key_Asterisk: "Num*", Qt.Key_Plus: "Num+",
+                          Qt.Key_Minus: "Num-", Qt.Key_Period: "Num.",
+                          Qt.Key_Slash: "Num/"}
+            name = numpad_ops.get(key, name)
         if name:
             parts.append(name)
         display = "+".join(parts)

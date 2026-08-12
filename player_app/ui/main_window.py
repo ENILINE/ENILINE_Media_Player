@@ -341,9 +341,11 @@ class MainWindow(QMainWindow):
         self._error_queue.clear()
         self.video_surface.set_current_path(path)
         self.controls.set_playing(True)
-        pos = self.storage.load_resume().get(path)
-        if pos:
-            QTimer.singleShot(300, lambda: self._apply_resume(path, pos))
+        settings = self.storage.load_settings()
+        if settings.get("remember_position", True):
+            pos = self.storage.load_resume().get(path)
+            if pos:
+                QTimer.singleShot(300, lambda: self._apply_resume(path, pos))
 
     def _apply_resume(self, path, pos):
         if self._current_path != path or not self.player:
@@ -659,6 +661,9 @@ class MainWindow(QMainWindow):
     # -- resume ---------------------------------------------------------------
     def _save_resume(self):
         if not self.player or not self._current_path:
+            return
+        settings = self.storage.load_settings()
+        if not settings.get("remember_position", True):
             return
         pos = self.player.get_position()
         dur = self.player.get_duration()
