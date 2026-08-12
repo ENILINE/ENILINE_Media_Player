@@ -45,11 +45,48 @@ class Playlist:
         return p
 
     def remove_invalid(self) -> int:
-        """Remove entries whose files don't exist or aren't media. Returns count removed."""
-        valid = [e for e in self.entries if os.path.isfile(e.path) and is_media_file(e.path)]
-        removed = len(self.entries) - len(valid)
-        self.entries = valid
-        return removed
+        """Remove entries whose files don't exist, aren't media, or can't be decoded.
+        Uses ffprobe (parallel) to check content validity for existing media files."""
+        import subprocess
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        old = len(self.entries)
+
+        # Pre-filter: existence + extension
+        candidates = [e for e in self.entries if os.path.isfile(e.path)
+                      and is_media_file(e.path)]
+
+        if not candidates:
+            self.entries = []
+            return old
+
+        def _ok(path):
+            try:
+                r = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-show_entries", "format=format_name",
+                     "-of", "default=noprint_wrappers=1:nokey=1", path],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                    if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+                )
+                return r.returncode == 0 and bool(r.stdout.strip())
+            except Exception:
+                return False
+
+        ok_paths: set[str] = set()
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {ex.submit(_ok, e.path): e.path for e in candidates}
+            for future in as_completed(futures):
+                path = futures[future]
+                try:
+                    if future.result():
+                        ok_paths.add(os.path.normcase(path))
+                except Exception:
+                    pass
+
+        self.entries = [e for e in self.entries
+                        if os.path.normcase(e.path) in ok_paths]
+        return old - len(self.entries)
 
     def dedupe(self) -> int:
         """Keep first occurrence of each path. Returns count removed."""

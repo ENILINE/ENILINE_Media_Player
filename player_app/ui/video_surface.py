@@ -44,8 +44,8 @@ class VideoSurface(QWidget):
         h = self.height()
         if h <= 0:
             return False
-        sub_y = int(h * self._sub_drag_start_pos / 100.0)
-        margin = int(h * 0.12)
+        sub_y = int(h * self._sub_drag_start_pos / 100.0) + int(h * 0.02)
+        margin = max(int(h * 0.04), 10)
         return abs(y - sub_y) < margin
 
     def mouseMoveEvent(self, event):

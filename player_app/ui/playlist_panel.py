@@ -270,6 +270,54 @@ class PlaylistPanel(QWidget):
         pid = self._selected_playlist_pid()
         if pid:
             self.playlist_selected.emit(pid)
+        # Defer validation so selection-settled state is enforced
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, self._validate_selection)
+
+    def _validate_selection(self):
+        """Enforce: at most one playlist selected; entries from one playlist only;
+        no mixing playlists and entries."""
+        if self._updating:
+            return
+        sel = self.tree.selectedItems()
+        if len(sel) <= 1:
+            return
+        playlists = [it for it in sel if it.parent() is None]
+        entries = [it for it in sel if it.parent() is not None]
+
+        if playlists and len(playlists) > 1:
+            # Keep only the first-selected playlist
+            self._updating = True
+            self.tree.blockSignals(True)
+            try:
+                for it in playlists[1:]:
+                    it.setSelected(False)
+                for it in entries:
+                    it.setSelected(False)
+            finally:
+                self.tree.blockSignals(False)
+                self._updating = False
+        elif playlists and entries:
+            # Mix of playlist(s) and entries — keep entries only
+            self._updating = True
+            self.tree.blockSignals(True)
+            try:
+                for it in playlists:
+                    it.setSelected(False)
+            finally:
+                self.tree.blockSignals(False)
+                self._updating = False
+        elif entries:
+            parent = entries[0].parent()
+            if any(it.parent() is not parent for it in entries):
+                self._updating = True
+                self.tree.blockSignals(True)
+                try:
+                    for it in entries:
+                        it.setSelected(it.parent() is parent)
+                finally:
+                    self.tree.blockSignals(False)
+                    self._updating = False
 
     def _on_item_clicked(self, item, _col):
         if item.parent() is None:
@@ -301,6 +349,20 @@ class PlaylistPanel(QWidget):
                     return True
         mods = event.modifiers()
         if mods & Qt.ControlModifier:
+            if key == Qt.Key_A:
+                # Select all entries within the current playlist, or no-op if playlist selected
+                sel = self.tree.selectedItems()
+                if sel and all(it.parent() is not None for it in sel):
+                    parent = sel[0].parent()
+                    self._updating = True
+                    self.tree.blockSignals(True)
+                    try:
+                        for i in range(parent.childCount()):
+                            parent.child(i).setSelected(True)
+                    finally:
+                        self.tree.blockSignals(False)
+                        self._updating = False
+                return True
             if key == Qt.Key_X:
                 self._cut()
                 return True
