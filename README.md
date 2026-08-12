@@ -35,7 +35,7 @@ python main.py
 
 ```bash
 pyinstaller player.spec --noconfirm
-# 产物:dist/VideoPlayer/VideoPlayer.exe
+# 产物:dist/ENILINE_Video_Player/
 ```
 
 ## 快捷键

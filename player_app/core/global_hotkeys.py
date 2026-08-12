@@ -1,8 +1,13 @@
-"""Global hotkeys via Win32 RegisterHotKey, disabled by default (empty strings)."""
+"""Global hotkeys via Win32 RegisterHotKey, disabled by default (empty strings).
+
+Qt5 on Windows dispatches WM_HOTKEY through the widget's nativeEvent() override,
+not through QAbstractNativeEventFilter.  The owning window must forward
+WM_HOTKEY messages to this manager's handle() method.
+"""
 import ctypes
 from ctypes import wintypes
 
-from PyQt5.QtCore import QAbstractNativeEventFilter, QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal
 
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
@@ -13,8 +18,6 @@ WM_HOTKEY = 0x0312
 
 MOD_NAMES = [(MOD_CONTROL, "Ctrl"), (MOD_ALT, "Alt"), (MOD_SHIFT, "Shift"), (MOD_WIN, "Win")]
 
-# Set up proper argtypes/restype for 64-bit Windows — HWND is pointer-sized,
-# and without this ctypes defaults to 32-bit int, truncating the handle.
 _user32 = ctypes.windll.user32
 _user32.RegisterHotKey.argtypes = [wintypes.HWND, wintypes.INT, wintypes.UINT, wintypes.UINT]
 _user32.RegisterHotKey.restype = wintypes.BOOL
@@ -31,7 +34,7 @@ _VK_MAP: dict[str, int] = {
     # Main numbers
     "0": 0x30, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34,
     "5": 0x35, "6": 0x36, "7": 0x37, "8": 0x38, "9": 0x39,
-    # Numpad (distinct from main keyboard numbers)
+    # Numpad
     "Num0": 0x60, "Num1": 0x61, "Num2": 0x62, "Num3": 0x63, "Num4": 0x64,
     "Num5": 0x65, "Num6": 0x66, "Num7": 0x67, "Num8": 0x68, "Num9": 0x69,
     "Num*": 0x6A, "Num+": 0x6B, "Num-": 0x6D, "Num.": 0x6E, "Num/": 0x6F,
@@ -52,18 +55,27 @@ _VK_MAP: dict[str, int] = {
 _VK_TO_NAME: dict[int, str] = {vk: name for name, vk in _VK_MAP.items()}
 
 
-class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
+class GlobalHotkeyManager(QObject):
     play_pause_pressed = pyqtSignal()
     prev_pressed = pyqtSignal()
     next_pressed = pyqtSignal()
 
     def __init__(self, parent=None):
-        QObject.__init__(self, parent)
+        super().__init__(parent)
         self._hotkeys: dict[int, tuple] = {}
-        self._next_id = 1
+        self._hwnd = 0
+
+    def handle(self, msg_hwnd, msg_message, msg_wparam, msg_lparam):
+        """Called from nativeEvent when WM_HOTKEY arrives. Returns (handled, result)."""
+        if msg_message == WM_HOTKEY:
+            hid = msg_wparam
+            entry = self._hotkeys.get(hid)
+            if entry:
+                entry[0].emit()
+            return True, 0
+        return False, 0
 
     def parse(self, s: str) -> tuple:
-        """Parse a key string like 'Ctrl+Shift+P' into (modifiers, vk). Returns (0,0) if empty."""
         if not s or not s.strip():
             return 0, 0
         parts = s.strip().split("+")
@@ -80,7 +92,6 @@ class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
         return mods, vk
 
     def to_string(self, mods: int, vk: int) -> str:
-        """Serialize modifiers + vk back to a display string."""
         if vk == 0:
             return ""
         parts = [name for m, name in MOD_NAMES if mods & m]
@@ -89,20 +100,14 @@ class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
         return "+".join(parts)
 
     def register(self, hwnd: int, hotkey_id: int, s: str) -> bool:
-        """Register a hotkey string. Returns True on success.
-
-        Empty string = disabled (returns True).
-        Single key without modifiers = rejected (returns False).
-        """
         mods, vk = self.parse(s)
         if vk == 0:
-            return True  # empty = disabled, not a failure
+            return True  # empty = disabled
         if mods == 0:
-            print(f"[hotkey] REJECTED bare key: '{s}' — requires at least one modifier")
+            print(f"[hotkey] REJECTED bare key: '{s}'")
             return False
         ok = _user32.RegisterHotKey(hwnd, hotkey_id, mods | MOD_NOREPEAT, vk)
-        err = ctypes.get_last_error() if not ok else 0
-        print(f"[hotkey] RegisterHotKey(hwnd=0x{hwnd:X}, id={hotkey_id}, mods=0x{mods|MOD_NOREPEAT:04X}, vk=0x{vk:02X}) -> {bool(ok)} err={err}")
+        print(f"[hotkey] RegisterHotKey(hwnd=0x{hwnd:X}, id={hotkey_id}, mods=0x{mods|MOD_NOREPEAT:04X}, vk=0x{vk:02X}) -> {bool(ok)}")
         return bool(ok)
 
     def unregister(self, hwnd: int, hotkey_id: int):
@@ -114,9 +119,8 @@ class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
         self._hotkeys.clear()
 
     def apply(self, hwnd: int, hotkeys: dict) -> dict:
-        """Apply hotkey dict {'play': 'Ctrl+Shift+P', ...}. Returns applied dict with failures cleared."""
         self.unregister_all(hwnd)
-        self._next_id = 1
+        self._hwnd = hwnd
         key_map = {
             "play": (1, self.play_pause_pressed),
             "prev": (2, self.prev_pressed),
@@ -131,17 +135,3 @@ class GlobalHotkeyManager(QObject, QAbstractNativeEventFilter):
             else:
                 result[setting_key] = ""
         return result
-
-    def nativeEventFilter(self, event_type, message):
-        msg = wintypes.MSG.from_address(int(message))
-        if msg.message == WM_HOTKEY:
-            hid = msg.wParam
-            print(f"[hotkey] WM_HOTKEY received: id={hid}")
-            entry = self._hotkeys.get(hid)
-            if entry:
-                print(f"[hotkey] emitting signal for id={hid}")
-                entry[0].emit()
-            else:
-                print(f"[hotkey] unknown id={hid}, registered={list(self._hotkeys.keys())}")
-            return True, 0
-        return False, 0

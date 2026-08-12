@@ -1,6 +1,6 @@
 import random
 
-from PyQt5.QtCore import QEvent, Qt, QTimer
+from PyQt5.QtCore import QByteArray, QEvent, Qt, QTimer
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QAbstractSpinBox,
@@ -97,7 +97,6 @@ class MainWindow(QMainWindow):
 
         app = QApplication.instance()
         self._hotkey_mgr = GlobalHotkeyManager(self)
-        app.installNativeEventFilter(self._hotkey_mgr)
         self._hotkey_mgr.play_pause_pressed.connect(self._toggle_play)
         self._hotkey_mgr.prev_pressed.connect(self._play_prev)
         self._hotkey_mgr.next_pressed.connect(self._play_next)
@@ -678,6 +677,12 @@ class MainWindow(QMainWindow):
     def _tree_has_focus(self):
         fw = QApplication.focusWidget()
         return fw is not None and self.panel.isAncestorOf(fw) and not self._is_text_input_focused()
+
+    def nativeEvent(self, eventType, message):
+        """Forward WM_HOTKEY to the hotkey manager."""
+        import ctypes
+        msg = ctypes.wintypes.MSG.from_address(int(message))
+        return self._hotkey_mgr.handle(msg.hWnd, msg.message, msg.wParam, msg.lParam)
 
     def eventFilter(self, obj, event):
         if QApplication.activePopupWidget() is not None:

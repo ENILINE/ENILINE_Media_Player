@@ -61,22 +61,20 @@ class MpvPlayer:
         try:
             d = event.as_dict(decoder=lambda b: b.decode("utf-8", "replace"))
             event_name = d.get("event", "")
-            # Log all file-related events for debugging playback failures
-            if event_name in ("start-file", "file-loaded", "end-file"):
-                reason = d.get("reason", "N/A") if event_name == "end-file" else ""
-                print(f"[mpv] {event_name} path={self._player.path} reason={reason}")
             if event_name == "file-loaded":
                 self.signals.file_loaded.emit(self._player.path or "")
             elif event_name == "end-file":
-                reason = d.get("reason", 0)
-                print(f"[mpv] end-file reason={reason} error={d.get('error','N/A')}")
-                if reason == 2:  # error
-                    self.signals.playback_error.emit(self._player.path or "")
+                # python-mpv converts reason to string: "eof"/"stop"/"error"/"redirect"
+                reason = d.get("reason", "")
+                if reason == "error":
+                    path = self._player.path or getattr(self, "_loaded_path", "")
+                    self.signals.playback_error.emit(path)
         except Exception:
             traceback.print_exc()
 
     # -- public API --------------------------------------------------------
     def load(self, path: str, start: bool = True):
+        self._loaded_path = path
         self._player.command("loadfile", path)
         if start:
             self._player.pause = False
