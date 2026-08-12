@@ -12,7 +12,7 @@
 
 #define MyAppName "ENILINE Media Player"
 #define MyAppExeName "ENILINE_Media_Player.exe"
-#define MyAppVersion "1.0"
+#define MyAppVersion "1.1"
 #define MyAppPublisher "ENILINE"
 #define MyAppURL "https://github.com/ENILINE/ENILINE_Media_Player"
 #define MyAppSource "dist\ENILINE_Media_Player"
