@@ -44,7 +44,7 @@ class VideoSurface(QWidget):
         h = self.height()
         if h <= 0:
             return False
-        sub_y = int(h * self._sub_drag_start_pos / 100.0) + int(h * 0.02)
+        sub_y = int(h * self._sub_drag_start_pos / 100.0) - int(h * 0.06)
         margin = max(int(h * 0.04), 10)
         return abs(y - sub_y) < margin
 
@@ -52,7 +52,7 @@ class VideoSurface(QWidget):
         if self._sub_dragging:
             # Direct mapping: subtitle y = mouse y
             h = max(self.height(), 1)
-            new_pos = int(event.y() / h * 100)
+            new_pos = int(event.y() / h * 100) + int(h * 0.005)
             new_pos = max(0, min(100, new_pos))
             self.subtitle_pos_changed.emit(new_pos)
         elif self._in_subtitle_zone(event.y()):

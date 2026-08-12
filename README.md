@@ -33,7 +33,7 @@ $$
 
 ```bash
 pip install -r requirements.txt
-python scripts/fetch_libmpv.py   # 下载 libmpv-2.dll 到 bin/
+python fetch_libmpv.py   # 下载 libmpv-2.dll 到 bin/
 python main.py
 ```
 
@@ -53,7 +53,7 @@ iscc installer.iss
 # 产物: dist/ENILINE_Media_Player_Setup.exe
 ```
 
-安装包支持: 程序文件安装、开始菜单快捷方式、卸载列表注册、23 种媒体格式关联(显示在 Windows"设置默认应用"中).
+安装包支持: 程序文件安装、开始菜单快捷方式、卸载列表注册、22 种媒体格式关联(显示在 Windows"设置默认应用"中).
 
 ## 快捷键
 
