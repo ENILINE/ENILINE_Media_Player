@@ -20,5 +20,6 @@ Thumbs.db
 Desktop.ini
 
 *.md
-
 !README.md
+
+playground/
