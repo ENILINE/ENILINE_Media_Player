@@ -23,7 +23,6 @@ $$
 - 剪切/复制/粘贴/删除/重命名(不修改本地文件),Ctrl+Z 撤销 / Ctrl+Y 重做
 - 支持 22 种常见媒体格式(MP4/MKV/AVI/MOV/WMV/FLV/WebM/TS/M4V/MPG/MPEG/3GP/MP3/FLAC/WAV/OGG/OGA/AAC/M4A/WMA/Opus/MKA)
 - 字幕开关 + 两种风格(黑边白字 / 白字黑底) + 拖动调整位置
-- 音量平衡(EBU R128 loudnorm 实时流模式)
 - 可配置全局快捷键(播放/暂停/上一首/下一首)
 - 关闭最小化到系统托盘
 - 窗口大小与侧栏宽度记忆
