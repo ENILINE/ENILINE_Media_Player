@@ -143,14 +143,6 @@ class SettingsDialog(QDialog):
         fl_sub.addRow("字幕样式", self._cmb_sub_style)
         layout.addWidget(gb_sub)
 
-        # Audio
-        gb_audio = QGroupBox("音频")
-        fl_audio = QFormLayout(gb_audio)
-        self._cb_norm = QCheckBox()
-        self._cb_norm.setChecked(self._values.get("volume_normalization", False))
-        fl_audio.addRow("音量平衡 (EBU R128)", self._cb_norm)
-        layout.addWidget(gb_audio)
-
         # System
         gb_sys = QGroupBox("系统")
         fl_sys = QFormLayout(gb_sys)
@@ -163,7 +155,6 @@ class SettingsDialog(QDialog):
         self._values["remember_position"] = self._cb_remember.isChecked()
         self._values["subtitle_enabled"] = self._cb_sub_enabled.isChecked()
         self._values["subtitle_style"] = self._cmb_sub_style.currentIndex() + 1
-        self._values["volume_normalization"] = self._cb_norm.isChecked()
         self._values["close_to_tray"] = self._cb_tray.isChecked()
         self._values["hotkey_play"] = self._hk_play.text()
         self._values["hotkey_prev"] = self._hk_prev.text()

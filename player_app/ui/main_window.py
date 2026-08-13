@@ -86,7 +86,6 @@ class MainWindow(QMainWindow):
         self._subtitle_enabled = True
         self._subtitle_style = 1
         self._subtitle_pos = 100
-        self._volume_normalization = False
         self._hotkey_settings = {"play": "", "prev": "", "next": ""}
         self._error_queue = []          # paths queued for error popup
         self._error_processing = False  # prevent cascading error handlers
@@ -214,7 +213,6 @@ class MainWindow(QMainWindow):
                 self.player.set_sub_visibility(False)
             self.player.apply_subtitle_style(self._subtitle_style)
             self.player.set_sub_pos(self._subtitle_pos)
-            self.player.set_volume_normalization(self._volume_normalization)
             self._connect_player()
             self._process_startup_paths()
             self._apply_hotkeys()
@@ -307,7 +305,6 @@ class MainWindow(QMainWindow):
         self._subtitle_enabled = st.get("subtitle_enabled", True)
         self._subtitle_style = st.get("subtitle_style", 1)
         self._subtitle_pos = st.get("subtitle_pos", 100)
-        self._volume_normalization = st.get("volume_normalization", False)
         self._hotkey_settings = {
             "play": st.get("hotkey_play", ""),
             "prev": st.get("hotkey_prev", ""),
@@ -810,7 +807,6 @@ class MainWindow(QMainWindow):
             "remember_position": self.storage.load_settings().get("remember_position", True),
             "subtitle_enabled": self._subtitle_enabled,
             "subtitle_style": self._subtitle_style,
-            "volume_normalization": self._volume_normalization,
             "close_to_tray": self._close_to_tray,
             "hotkey_play": self._hotkey_settings.get("play", ""),
             "hotkey_prev": self._hotkey_settings.get("prev", ""),
@@ -821,7 +817,6 @@ class MainWindow(QMainWindow):
             vals = dlg.values()
             self._subtitle_enabled = vals["subtitle_enabled"]
             self._subtitle_style = vals["subtitle_style"]
-            self._volume_normalization = vals["volume_normalization"]
             self._close_to_tray = vals["close_to_tray"]
             self._hotkey_settings = {
                 "play": vals["hotkey_play"],
@@ -829,14 +824,11 @@ class MainWindow(QMainWindow):
                 "next": vals["hotkey_next"],
             }
             self._apply_subtitle_settings()
-            if self.player:
-                self.player.set_volume_normalization(self._volume_normalization)
             self._apply_hotkeys()
             self._update_settings({
                 "remember_position": vals["remember_position"],
                 "subtitle_enabled": vals["subtitle_enabled"],
                 "subtitle_style": vals["subtitle_style"],
-                "volume_normalization": vals["volume_normalization"],
                 "close_to_tray": vals["close_to_tray"],
                 "hotkey_play": vals["hotkey_play"],
                 "hotkey_prev": vals["hotkey_prev"],

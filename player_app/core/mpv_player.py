@@ -119,14 +119,6 @@ class MpvPlayer:
     def is_muted(self) -> bool:
         return self._muted
 
-    _BASE_AF = "scaletempo2=max-speed=32.0"
-
-    def set_volume_normalization(self, on: bool):
-        if on:
-            self._player.af = self._BASE_AF + ",lavfi=[dynaudnorm=f=200:p=0.95:m=10]"
-        else:
-            self._player.af = self._BASE_AF
-
     # -- subtitles ------------------------------------------------------------
     def set_sub_visibility(self, on: bool):
         self._player.command("set", "sub-visibility", "yes" if on else "no")
