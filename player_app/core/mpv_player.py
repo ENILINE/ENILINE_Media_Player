@@ -123,7 +123,7 @@ class MpvPlayer:
 
     def set_volume_normalization(self, on: bool):
         if on:
-            self._player.af = self._BASE_AF + ",lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]"
+            self._player.af = self._BASE_AF + ",lavfi=[dynaudnorm=f=200:p=0.95:m=10]"
         else:
             self._player.af = self._BASE_AF
 
