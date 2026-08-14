@@ -445,6 +445,7 @@ class MainWindow(QMainWindow):
         if not _os.path.isfile(path):
             self._on_playback_error(path)
             return
+        self._current_path = None  # cleared until file-loaded confirms; keeps a stale path from surviving a failed load
         self._loading_path = path
         self.player.load(path)
         self._load_timeout_timer.start(4000)  # 4s timeout for invalid formats
