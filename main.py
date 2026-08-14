@@ -33,7 +33,6 @@ from PyQt5.QtGui import QIcon, QPainter, QPixmap
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
-from player_app.ui.main_window import MainWindow  # noqa: E402
 from player_app.ui.theme import QSS  # noqa: E402
 
 
@@ -71,13 +70,16 @@ def main():
             startup_paths.append(os.path.abspath(arg))
 
     from player_app.core.ipc import try_send_to_existing
-    if startup_paths and try_send_to_existing(startup_paths):
+    if try_send_to_existing(startup_paths):
         sys.exit(0)
 
-    win = MainWindow(startup_paths=startup_paths)
-    if not icon.isNull():
-        win.setWindowIcon(icon)
-    win.show()
+    from player_app.core.app_controller import AppController
+    controller = AppController()
+    if not controller.ipc_server.is_listening:
+        # Lost the single-instance listen race; forward to the winner and exit.
+        try_send_to_existing(startup_paths)
+        sys.exit(0)
+    controller.create_window(startup_paths)
     sys.exit(app.exec_())
 
 

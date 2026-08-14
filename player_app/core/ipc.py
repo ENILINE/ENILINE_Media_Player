@@ -33,6 +33,10 @@ class IPCServer(QObject):
         ok = self._server.listen(SERVER_NAME)
         self._ok = ok
 
+    @property
+    def is_listening(self) -> bool:
+        return self._ok
+
     def _on_connection(self):
         sock = self._server.nextPendingConnection()
         if sock is None:

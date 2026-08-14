@@ -143,19 +143,10 @@ class SettingsDialog(QDialog):
         fl_sub.addRow("字幕样式", self._cmb_sub_style)
         layout.addWidget(gb_sub)
 
-        # System
-        gb_sys = QGroupBox("系统")
-        fl_sys = QFormLayout(gb_sys)
-        self._cb_tray = QCheckBox()
-        self._cb_tray.setChecked(self._values.get("close_to_tray", False))
-        fl_sys.addRow("关闭时最小化到任务栏", self._cb_tray)
-        layout.addWidget(gb_sys)
-
     def _save(self):
         self._values["remember_position"] = self._cb_remember.isChecked()
         self._values["subtitle_enabled"] = self._cb_sub_enabled.isChecked()
         self._values["subtitle_style"] = self._cmb_sub_style.currentIndex() + 1
-        self._values["close_to_tray"] = self._cb_tray.isChecked()
         self._values["hotkey_play"] = self._hk_play.text()
         self._values["hotkey_prev"] = self._hk_prev.text()
         self._values["hotkey_next"] = self._hk_next.text()
