@@ -5,12 +5,17 @@ Storage, the single-instance IPC server, and the system-wide global hotkey
 registration. Each MainWindow keeps its own player, temp playlist, and
 playback state.
 """
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 from PyQt5.QtWidgets import QApplication, QMessageBox
 
 from .global_hotkeys import GlobalHotkeyManager
 from .ipc import IPCServer
 from .storage import Storage
+
+# Windows launches the exe once per file when multi-selecting and choosing
+# "Open" via the default-app association; drag-to-exe launches it once with
+# all files. Batch near-simultaneous IPC path bursts into a single window.
+REMOTE_BATCH_MS = 300
 
 
 class AppController(QObject):
@@ -38,6 +43,12 @@ class AppController(QObject):
         self.ipc_server = IPCServer(self)
         self.ipc_server.paths_received.connect(self.handle_remote_paths)
 
+        self._pending_paths = []
+        self._remote_timer = QTimer(self)
+        self._remote_timer.setSingleShot(True)
+        self._remote_timer.setInterval(REMOTE_BATCH_MS)
+        self._remote_timer.timeout.connect(self._flush_remote_paths)
+
     # -- windows --------------------------------------------------------------
     def create_window(self, startup_paths):
         from ..ui.main_window import MainWindow
@@ -49,7 +60,15 @@ class AppController(QObject):
         return win
 
     def handle_remote_paths(self, paths):
-        # Any new media open while running -> spawn a fresh window.
+        # Buffer and debounce: one "open" gesture may arrive as many near-
+        # simultaneous messages (multi-select "Open" launches the exe per file),
+        # which should collapse into a single new window.
+        self._pending_paths.extend(paths)
+        self._remote_timer.start()
+
+    def _flush_remote_paths(self):
+        paths = self._pending_paths
+        self._pending_paths = []
         self.create_window(paths)
 
     def register_window(self, win):

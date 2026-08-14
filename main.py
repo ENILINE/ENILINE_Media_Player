@@ -79,7 +79,7 @@ def main():
         # Lost the single-instance listen race; forward to the winner and exit.
         try_send_to_existing(startup_paths)
         sys.exit(0)
-    controller.create_window(startup_paths)
+    controller.handle_remote_paths(startup_paths)
     sys.exit(app.exec_())
 
 

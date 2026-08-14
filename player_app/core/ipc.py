@@ -41,13 +41,13 @@ class IPCServer(QObject):
         sock = self._server.nextPendingConnection()
         if sock is None:
             return
-        while sock.waitForReadyRead(500):
-            pass
-        data = bytes(sock.readAll())
+        data = bytearray()
+        while sock.waitForReadyRead(200):
+            data.extend(bytes(sock.readAll()))
         sock.disconnectFromServer()
         sock.close()
         try:
-            paths = json.loads(data.decode("utf-8"))
+            paths = json.loads(bytes(data).decode("utf-8"))
             if isinstance(paths, list):
                 self.paths_received.emit(paths)
         except Exception:
