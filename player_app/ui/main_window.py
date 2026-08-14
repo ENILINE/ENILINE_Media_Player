@@ -375,7 +375,7 @@ class MainWindow(QMainWindow):
         self.controls.set_playing(True)
 
     def _seek(self, seconds):
-        if not self.player:
+        if not self.player or not self._current_path:
             return
         was_eof = self._at_eof
         self._at_eof = False
@@ -666,6 +666,14 @@ class MainWindow(QMainWindow):
         return self.controller.hotkey_mgr.handle(msg.hWnd, msg.message, msg.wParam, msg.lParam)
 
     def eventFilter(self, obj, event):
+        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
+            # Normal shortcuts go to the active window only.
+            if QApplication.activeWindow() is not self:
+                return False
+            if event.type() == QEvent.KeyPress:
+                return self._on_key_press(event)
+            return self._on_key_release(event)
+
         if isinstance(obj, QWidget) and obj.window() is not self:
             return False
         if QApplication.activePopupWidget() is not None:
@@ -684,10 +692,6 @@ class MainWindow(QMainWindow):
             self._show_controls_fs()
             local = self.controls.mapFromGlobal(event.globalPos())
             self._controls_hovered = self.controls.rect().contains(local)
-        if event.type() == QEvent.KeyPress:
-            return self._on_key_press(event)
-        if event.type() == QEvent.KeyRelease:
-            return self._on_key_release(event)
         return False
 
     def _on_key_press(self, event):
@@ -771,7 +775,7 @@ class MainWindow(QMainWindow):
         return False
 
     def _enter_turbo(self):
-        if not self.player:
+        if not self.player or not self._current_path:
             return
         self._turbo_active = True
         self._base_speed = self.player.get_speed()
