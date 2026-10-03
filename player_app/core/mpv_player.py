@@ -101,6 +101,22 @@ class MpvPlayer:
     def set_speed(self, v: float):
         self._player.speed = float(v)
 
+    def start_turbo(self, speed: float):
+        self.set_speed(speed)
+        self._refresh_audio_timing()
+
+    def stop_turbo(self, speed: float, refresh_audio: bool = True):
+        self.set_speed(speed)
+        if refresh_audio:
+            self._refresh_audio_timing()
+
+    def _refresh_audio_timing(self):
+        # mpv uses buffered audio as the video clock. Flush that buffer after
+        # a speed change, or video briefly stalls and later skips to catch up.
+        # An exact zero-distance seek refreshes timing without deselecting audio.
+        if self._player.vid and self._player.aid:
+            self._player.command("seek", "0", "relative+exact")
+
     def get_volume(self) -> int:
         v = self._player.volume
         return int(v) if v is not None else 0

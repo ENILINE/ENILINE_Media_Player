@@ -66,7 +66,10 @@ class MainWindow(QMainWindow):
 
         self._turbo_active = False
         self._base_speed = 1.0
-        self._right_timer = None
+        self._right_pressed = False
+        self._right_timer = QTimer(self)
+        self._right_timer.setSingleShot(True)
+        self._right_timer.timeout.connect(self._on_right_long_press)
         self._right_ctrl = False
         self._right_long_press = False
         self._refresh_queued = False
@@ -443,8 +446,10 @@ class MainWindow(QMainWindow):
         path = pl.entries[index].path
         import os as _os
         if not _os.path.isfile(path):
+            self._cancel_right_press()
             self._on_playback_error(path)
             return
+        self._cancel_right_press(resync=False)  # loading the next file flushes audio
         self._current_path = None  # cleared until file-loaded confirms; keeps a stale path from surviving a failed load
         self._loading_path = path
         self.player.load(path)
@@ -677,18 +682,10 @@ class MainWindow(QMainWindow):
 
         if isinstance(obj, QWidget) and obj.window() is not self:
             return False
+        if event.type() == QEvent.WindowDeactivate and self._right_pressed:
+            self._cancel_right_press()
         if QApplication.activePopupWidget() is not None:
             return False
-        if event.type() == QEvent.WindowDeactivate and (self._turbo_active or self._right_timer):
-            if self._turbo_active:
-                self.player.set_speed(self._base_speed)
-                self.controls.set_speed_display(self._base_speed)
-                self._turbo_active = False
-            if self._right_timer:
-                self._right_timer.stop()
-            self._right_timer = None
-            self._right_long_press = False
-            self._right_ctrl = False
         if event.type() == QEvent.MouseMove and self.isFullScreen():
             self._show_controls_fs()
             local = self.controls.mapFromGlobal(event.globalPos())
@@ -725,14 +722,14 @@ class MainWindow(QMainWindow):
             self._seek(-30 if ctrl else -5)
             return True
         if key == Qt.Key_Right:
-            if event.isAutoRepeat():
+            if event.isAutoRepeat() or self._right_pressed:
                 return True
+            if not self.player or not self._current_path:
+                return True
+            self._right_pressed = True
             self._right_ctrl = ctrl
             self._right_long_press = False
             self._enter_turbo()
-            self._right_timer = QTimer(self)
-            self._right_timer.setSingleShot(True)
-            self._right_timer.timeout.connect(self._on_right_long_press)
             self._right_timer.start(TURBO_HOLD_MS)
             return True
         if key == Qt.Key_Up:
@@ -755,32 +752,35 @@ class MainWindow(QMainWindow):
         return False
 
     def _on_key_release(self, event):
+        if event.key() == Qt.Key_Right and not event.isAutoRepeat():
+            if not self._right_pressed:
+                return True
+            was_long = self._right_long_press
+            ctrl = self._right_ctrl
+            self._cancel_right_press(resync=was_long)  # a short press seeks next
+            if not was_long:
+                self._seek(30 if ctrl else 5)
+            return True
         if self._is_text_input_focused():
             return False
         if self._tree_has_focus():
             return False
-        if event.key() == Qt.Key_Right and not event.isAutoRepeat():
-            if self._right_timer is not None:
-                self._right_timer.stop()
-            self._right_timer = None
-            was_long = self._right_long_press
-            if self._turbo_active:
-                self.player.set_speed(self._base_speed)
-                self.controls.set_speed_display(self._base_speed)
-                self._turbo_active = False
-            if not was_long:
-                self._seek(30 if self._right_ctrl else 5)
-            self._right_long_press = False
-            self._right_ctrl = False
-            return True
         return False
 
+    def _cancel_right_press(self, resync=True):
+        self._right_timer.stop()
+        if self._turbo_active:
+            self.player.stop_turbo(self._base_speed, refresh_audio=resync)
+            self.controls.set_speed_display(self._base_speed)
+            self._turbo_active = False
+        self._right_pressed = False
+        self._right_long_press = False
+        self._right_ctrl = False
+
     def _enter_turbo(self):
-        if not self.player or not self._current_path:
-            return
         self._turbo_active = True
         self._base_speed = self.player.get_speed()
-        self.player.set_speed(speed_for_turbo(self._base_speed))
+        self.player.start_turbo(speed_for_turbo(self._base_speed))
 
     def _on_right_long_press(self):
         self._right_long_press = True
